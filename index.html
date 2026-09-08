@@ -1950,78 +1950,147 @@ function showLanding(){
   document.getElementById('dashboard').classList.add('hidden');
 }
 
-function doRegister(){
+async function doRegister(){
   const n=document.getElementById('regName').value.trim();
   const e=document.getElementById('regEmail').value.trim().toLowerCase();
   const p=document.getElementById('regPass').value;
   if(!n||n.length<2)return toast('নাম লিখুন','err');
-  // Accept any valid @gmail.com address
   if(!e || !e.endsWith('@gmail.com') || e.indexOf('@') !== e.lastIndexOf('@') || e.split('@')[0].length < 1){
     return toast('শুধু @gmail.com ব্যবহার করুন','err');
   }
-  if(Object.values(users).find(u=>u.email===e))return toast('এই Gmail ইতিমধ্যে ব্যবহৃত','err');
   if(p.length<6)return toast('পাসওয়ার্ড কমপক্ষে ৬ অক্ষর','err');
+  if(!window.fbRegister) return toast('Firebase লোড হচ্ছে, একটু অপেক্ষা করুন','err');
+
   const uid=n.toLowerCase().replace(/[^a-z0-9]/g,'').slice(0,6)+Math.floor(1000+Math.random()*9000);
   if(!uid || uid.length < 5) return toast('নামে অক্ষর/সংখ্যা দিন','err');
+
   let referredBy = null;
   try {
     const refId = new URLSearchParams(location.search).get('ref');
-    if(refId && users[refId]) {
-      referredBy = refId;
-      users[refId].refCount = (users[refId].refCount||0) + 1;
-      users[refId].earned = (users[refId].earned||0) + 10; // activate bonus
+    if(refId) {
+      const refUser = await window.fbFindUserByUserId(refId);
+      if(refUser && refUser.authUid) {
+        referredBy = refId;
+        refUser.refCount = (refUser.refCount||0) + 1;
+        refUser.earned = (refUser.earned||0) + 10;
+        await window.fbSaveUser(refUser);
+      }
     }
-  } catch(err){}
-  users[uid]={name:n,userId:uid,email:e,password:p,earned:0,totalEarned:0,deposited:0,refCount:0,refBal:0,tasks:[],withdraws:[],deposits:[],verified:false,verifyStatus:'none',verifyData:null,age:'',country:'Bangladesh',about:'',mode:'Worker',joinDate:new Date().toLocaleDateString('en-GB',{day:'2-digit',month:'short',year:'2-digit'}),secCode:'',loginHistory:[],referredBy:referredBy,seenNoticeIds:[],notices:[],chatUnread:false,jobsUnlocked:false};
-  // Welcome notice about unlock rule
-  users[uid].notices.push({
-    id: Date.now(),
-    title: 'স্বাগতম SolixPay-এ!',
-    body: 'প্রথমে ৳৫০০ Earning করলে সকল কাজ করতে পারবেন। এখন শুধু Gmail Account ও Telegram কাজ দেখা যাচ্ছে।',
-    time: 'Just now'
-  });
-  localStorage.setItem('solix_users',JSON.stringify(users));
-  toast('অ্যাকাউন্ট তৈরি! ID: '+uid);
-  document.getElementById('loginId').value=uid;
-  showAuth('login');
+  } catch(err){ console.error(err); }
+
+  const profile = {
+    name:n, userId:uid, email:e,
+    earned:0, totalEarned:0, deposited:0, refCount:0, refBal:0,
+    tasks:[], withdraws:[], deposits:[], ads:[], postedJobs:[],
+    verified:false, verifyStatus:'none', verifyData:null,
+    age:'', country:'Bangladesh', about:'', mode:'Worker',
+    joinDate:new Date().toLocaleDateString('en-GB',{day:'2-digit',month:'short',year:'2-digit'}),
+    secCode:'', loginHistory:[], referredBy:referredBy,
+    seenNoticeIds:[], notices:[{
+      id: Date.now(),
+      title: 'স্বাগতম SolixPay-এ!',
+      body: 'প্রথমে ৳৫০০ Earning করলে সকল কাজ করতে পারবেন। এখন শুধু Gmail Account ও Telegram কাজ দেখা যাচ্ছে।',
+      time: 'Just now'
+    }],
+    chatUnread:false, jobsUnlocked:false, nameEdited:false
+  };
+
+  try {
+    toast('অ্যাকাউন্ট তৈরি হচ্ছে...');
+    const created = await window.fbRegister(e, p, profile);
+    // also keep local cache lightly
+    users[created.userId] = created;
+    document.getElementById('loginId').value = e;
+    toast('অ্যাকাউন্ট তৈরি হয়েছে! এখন Login করুন');
+    showAuth('login');
+  } catch(err) {
+    console.error(err);
+    let msg = 'রেজিস্টার ব্যর্থ';
+    if(err && err.code === 'auth/email-already-in-use') msg = 'এই Gmail ইতিমধ্যে ব্যবহৃত';
+    else if(err && err.code === 'auth/invalid-email') msg = 'ইমেইল সঠিক নয়';
+    else if(err && err.code === 'auth/weak-password') msg = 'পাসওয়ার্ড দুর্বল';
+    else if(err && err.message) msg = err.message;
+    toast(msg, 'err');
+  }
 }
-function doLogin(){
+
+async function doLogin(){
   const id=document.getElementById('loginId').value.trim().toLowerCase();
   const p=document.getElementById('loginPass').value;
-  let u=users[id]||Object.values(users).find(x=>x.email===id);
-  if(!u||u.password!==p)return toast('ভুল তথ্য','err');
-  currentUser=u;
-  if(!currentUser.tasks)currentUser.tasks=[];
-  if(!currentUser.withdraws)currentUser.withdraws=[];
-  if(!currentUser.deposits)currentUser.deposits=[];
-  if(!currentUser.ads)currentUser.ads=[];
-  if(!currentUser.postedJobs)currentUser.postedJobs=[];
-  if(currentUser.verified === undefined) currentUser.verified = false;
-  if(!currentUser.verifyStatus) currentUser.verifyStatus = currentUser.verified ? 'approved' : 'none';
-  if(!currentUser.mode) currentUser.mode = 'Worker';
-  if(!currentUser.country) currentUser.country = 'Bangladesh';
-  if(!currentUser.joinDate) currentUser.joinDate = new Date().toLocaleDateString('en-GB',{day:'2-digit',month:'short',year:'2-digit'});
-  if(!currentUser.loginHistory) currentUser.loginHistory = [];
-  if(!currentUser.seenNoticeIds) currentUser.seenNoticeIds = [];
-  if(!currentUser.notices) currentUser.notices = [];
-  if(currentUser.chatUnread === undefined) currentUser.chatUnread = false;
-  if(currentUser.totalEarned === undefined) currentUser.totalEarned = currentUser.earned || 0;
-  if(currentUser.jobsUnlocked === undefined) currentUser.jobsUnlocked = (currentUser.totalEarned||0) >= UNLOCK_EARN_NEED;
-  // add current login
-  const nowStr = new Date().toLocaleString();
-  currentUser.loginHistory.unshift({ip:'103.136.207.'+Math.floor(Math.random()*255), time: nowStr});
-  if(currentUser.loginHistory.length > 8) currentUser.loginHistory = currentUser.loginHistory.slice(0,8);
-  localStorage.setItem('solix_current',u.userId);
-  initDash();
+  if(!id || !p) return toast('Email ও Password দিন','err');
+  if(!window.fbLogin) return toast('Firebase লোড হচ্ছে, একটু অপেক্ষা করুন','err');
+
+  // login with email (if user typed userId, resolve email from firestore)
+  let email = id;
+  try {
+    toast('লগইন হচ্ছে...');
+    if(!id.includes('@')) {
+      const byUid = await window.fbFindUserByUserId(id);
+      if(byUid && byUid.email) email = byUid.email;
+      else return toast('ভুল তথ্য','err');
+    }
+    const u = await window.fbLogin(email, p);
+    if(!u) return toast('প্রোফাইল পাওয়া যায়নি','err');
+
+    currentUser = u;
+    if(!currentUser.tasks) currentUser.tasks=[];
+    if(!currentUser.withdraws) currentUser.withdraws=[];
+    if(!currentUser.deposits) currentUser.deposits=[];
+    if(!currentUser.ads) currentUser.ads=[];
+    if(!currentUser.postedJobs) currentUser.postedJobs=[];
+    if(currentUser.verified === undefined) currentUser.verified = false;
+    if(!currentUser.verifyStatus) currentUser.verifyStatus = currentUser.verified ? 'approved' : 'none';
+    if(!currentUser.mode) currentUser.mode = 'Worker';
+    if(!currentUser.country) currentUser.country = 'Bangladesh';
+    if(!currentUser.joinDate) currentUser.joinDate = new Date().toLocaleDateString('en-GB',{day:'2-digit',month:'short',year:'2-digit'});
+    if(!currentUser.loginHistory) currentUser.loginHistory = [];
+    if(!currentUser.seenNoticeIds) currentUser.seenNoticeIds = [];
+    if(!currentUser.notices) currentUser.notices = [];
+    if(currentUser.chatUnread === undefined) currentUser.chatUnread = false;
+    if(currentUser.totalEarned === undefined) currentUser.totalEarned = currentUser.earned || 0;
+    if(currentUser.jobsUnlocked === undefined) currentUser.jobsUnlocked = (currentUser.totalEarned||0) >= UNLOCK_EARN_NEED;
+
+    const nowStr = new Date().toLocaleString();
+    currentUser.loginHistory.unshift({ip:'103.136.207.'+Math.floor(Math.random()*255), time: nowStr});
+    if(currentUser.loginHistory.length > 8) currentUser.loginHistory = currentUser.loginHistory.slice(0,8);
+
+    users[currentUser.userId] = currentUser;
+    await save();
+    // load public jobs from Firestore
+    try {
+      const remoteJobs = await window.fbLoadJobs();
+      if(remoteJobs && remoteJobs.length) {
+        JOBS.length = 0;
+        remoteJobs.forEach(j => JOBS.push(j));
+      }
+    } catch(e) {}
+    initDash();
+  } catch(err) {
+    console.error(err);
+    let msg = 'ভুল তথ্য';
+    if(err && (err.code === 'auth/user-not-found' || err.code === 'auth/wrong-password' || err.code === 'auth/invalid-credential'))
+      msg = 'ভুল Email বা Password';
+    else if(err && err.code === 'auth/too-many-requests') msg = 'অনেকবার চেষ্টা — একটু পর আবার চেষ্টা করুন';
+    toast(msg, 'err');
+  }
 }
-function doForgot(){
+
+async function doForgot(){
   const e=document.getElementById('forgotEmail').value.trim().toLowerCase();
-  const u=Object.values(users).find(x=>x.email===e);
-  if(!u)return toast('অ্যাকাউন্ট নেই','err');
-  toast('User ID: '+u.userId);
+  if(!e) return toast('Gmail দিন','err');
+  if(!window.fbResetPassword) return toast('Firebase লোড হচ্ছে...','err');
+  try {
+    await window.fbResetPassword(e);
+    toast('Password reset লিংক Email-এ পাঠানো হয়েছে');
+  } catch(err) {
+    console.error(err);
+    toast('Email পাওয়া যায়নি বা লিংক পাঠানো যায়নি','err');
+  }
 }
-function doLogout(){
+
+async function doLogout(){
   currentUser=null;
+  try { if(window.fbLogout) await window.fbLogout(); } catch(e) {}
   localStorage.removeItem('solix_current');
   showLanding();
   document.getElementById('profMenu').classList.add('hidden');
@@ -3329,7 +3398,7 @@ function submitPostJob(){
   currentUser.postedJobs.unshift(job);
 
   // Also add to public JOBS list so workers can see
-  JOBS.unshift({
+  const pubJob = {
     id: jobId,
     title: title,
     badge: 'NEW',
@@ -3343,7 +3412,13 @@ function submitPostJob(){
     estDays: estDays,
     screens: Math.min(Math.max(screens, 0), 2),
     ownerId: currentUser.userId
-  });
+  };
+  JOBS.unshift(pubJob);
+  try {
+    if(window.fbAddJob) {
+      window.fbAddJob(pubJob).then(docId => { pubJob._docId = docId; }).catch(console.error);
+    }
+  } catch(e) {}
 
   save(); updateUI();
   toast('Job posted successfully!');
@@ -3404,17 +3479,46 @@ function copyRef(){
   document.execCommand('copy');
   toast('Link copied');
 }
-function save(){users[currentUser.userId]=currentUser;localStorage.setItem('solix_users',JSON.stringify(users))}
+async function save(){
+  if(!currentUser) return;
+  users[currentUser.userId]=currentUser;
+  try { localStorage.setItem('solix_users', JSON.stringify(users)); } catch(e) {}
+  try {
+    if(window.fbSaveUser && currentUser.authUid) {
+      await window.fbSaveUser(currentUser);
+    }
+  } catch(e) {
+    console.error('Firestore save failed', e);
+  }
+}
 
-document.addEventListener('DOMContentLoaded',()=>{
+document.addEventListener('DOMContentLoaded', async ()=>{
   try{if(localStorage.getItem('solix_dark')==='1')document.body.classList.add('dark-theme')}catch(e){}
 
-  const s=localStorage.getItem('solix_current');
-  if(s&&users[s]){currentUser=users[s];initDash()}
-  else showLanding();
+  // Wait Firebase auth state
+  try {
+    if(window.fbReady) await window.fbReady;
+  } catch(e) {}
+
+  if(window._fbPendingUser) {
+    currentUser = window._fbPendingUser;
+    window._fbPendingUser = null;
+    users[currentUser.userId] = currentUser;
+    try {
+      const remoteJobs = await window.fbLoadJobs();
+      if(remoteJobs && remoteJobs.length) {
+        JOBS.length = 0;
+        remoteJobs.forEach(j => JOBS.push(j));
+      }
+    } catch(e) {}
+    initDash();
+  } else {
+    showLanding();
+  }
   updateNotifyBadge();
   updateChatBadge();
 });
+
 document.addEventListener('click',e=>{
   if(!e.target.closest('#profMenu')&&!e.target.closest('[onclick*="toggleProf"]'))document.getElementById('profMenu').classList.add('hidden');
 });
@@ -3531,16 +3635,34 @@ document.addEventListener('click',e=>{
 </div>
 
 
-<!-- Firebase SDK -->
+<!-- Firebase SDK: Auth + Firestore -->
 <script type="module">
-  // Import the functions you need from the SDKs you need
   import { initializeApp } from "https://www.gstatic.com/firebasejs/12.18.0/firebase-app.js";
   import { getAnalytics } from "https://www.gstatic.com/firebasejs/12.18.0/firebase-analytics.js";
-  // TODO: Add SDKs for Firebase products that you want to use
-  // https://firebase.google.com/docs/web/setup#available-libraries
+  import {
+    getAuth,
+    createUserWithEmailAndPassword,
+    signInWithEmailAndPassword,
+    signOut,
+    onAuthStateChanged,
+    sendPasswordResetEmail
+  } from "https://www.gstatic.com/firebasejs/12.18.0/firebase-auth.js";
+  import {
+    getFirestore,
+    doc,
+    setDoc,
+    getDoc,
+    updateDoc,
+    collection,
+    getDocs,
+    query,
+    where,
+    addDoc,
+    orderBy,
+    limit,
+    serverTimestamp
+  } from "https://www.gstatic.com/firebasejs/12.18.0/firebase-firestore.js";
 
-  // Your web app's Firebase configuration
-  // For Firebase JS SDK v7.20.0 and later, measurementId is optional
   const firebaseConfig = {
     apiKey: "AIzaSyCRAg77WzBxWrUDZommYhjc0uXkzyToLHc",
     authDomain: "solixpay-fa908.firebaseapp.com",
@@ -3551,13 +3673,130 @@ document.addEventListener('click',e=>{
     measurementId: "G-VYM7GHQGWG"
   };
 
-  // Initialize Firebase
   const app = initializeApp(firebaseConfig);
-  const analytics = getAnalytics(app);
+  try { getAnalytics(app); } catch(e) {}
+  const auth = getAuth(app);
+  const db = getFirestore(app);
 
-  // global access for later Auth/Firestore
   window.firebaseApp = app;
+  window.fbAuth = auth;
+  window.fbDb = db;
+
+  // Strip sensitive / non-serializable fields before saving to Firestore
+  function userToFirestore(u) {
+    if (!u) return {};
+    const copy = { ...u };
+    delete copy.password;
+    // ensure arrays exist
+    copy.tasks = copy.tasks || [];
+    copy.withdraws = copy.withdraws || [];
+    copy.deposits = copy.deposits || [];
+    copy.ads = copy.ads || [];
+    copy.postedJobs = copy.postedJobs || [];
+    copy.notices = copy.notices || [];
+    copy.loginHistory = copy.loginHistory || [];
+    copy.seenNoticeIds = copy.seenNoticeIds || [];
+    return copy;
+  }
+
+  window.fbSaveUser = async function(u) {
+    if (!u || !u.authUid) return;
+    try {
+      await setDoc(doc(db, "users", u.authUid), userToFirestore(u), { merge: true });
+    } catch (e) {
+      console.error("fbSaveUser", e);
+      throw e;
+    }
+  };
+
+  window.fbLoadUser = async function(authUid) {
+    const snap = await getDoc(doc(db, "users", authUid));
+    if (!snap.exists()) return null;
+    return { ...snap.data(), authUid };
+  };
+
+  window.fbFindUserByEmail = async function(email) {
+    const q = query(collection(db, "users"), where("email", "==", email.toLowerCase()), limit(1));
+    const snap = await getDocs(q);
+    if (snap.empty) return null;
+    const d = snap.docs[0];
+    return { ...d.data(), authUid: d.id };
+  };
+
+  window.fbFindUserByUserId = async function(userId) {
+    const q = query(collection(db, "users"), where("userId", "==", userId), limit(1));
+    const snap = await getDocs(q);
+    if (snap.empty) return null;
+    const d = snap.docs[0];
+    return { ...d.data(), authUid: d.id };
+  };
+
+  window.fbRegister = async function(email, password, profile) {
+    const cred = await createUserWithEmailAndPassword(auth, email, password);
+    const authUid = cred.user.uid;
+    const data = userToFirestore({ ...profile, authUid, email: email.toLowerCase() });
+    await setDoc(doc(db, "users", authUid), data);
+    return { ...data, authUid };
+  };
+
+  window.fbLogin = async function(email, password) {
+    const cred = await signInWithEmailAndPassword(auth, email, password);
+    const u = await window.fbLoadUser(cred.user.uid);
+    return u;
+  };
+
+  window.fbLogout = async function() {
+    await signOut(auth);
+  };
+
+  window.fbResetPassword = async function(email) {
+    await sendPasswordResetEmail(auth, email);
+  };
+
+  // Jobs collection
+  window.fbLoadJobs = async function() {
+    try {
+      const snap = await getDocs(collection(db, "jobs"));
+      const list = [];
+      snap.forEach(d => list.push({ ...d.data(), id: d.data().id || d.id, _docId: d.id }));
+      return list;
+    } catch (e) {
+      console.error("fbLoadJobs", e);
+      return [];
+    }
+  };
+
+  window.fbAddJob = async function(job) {
+    const ref = await addDoc(collection(db, "jobs"), { ...job, createdAt: Date.now() });
+    return ref.id;
+  };
+
+  window.fbUpdateJob = async function(docId, data) {
+    if (!docId) return;
+    await updateDoc(doc(db, "jobs", docId), data);
+  };
+
+  // Auth state → restore session
+  window.fbReady = new Promise((resolve) => {
+    onAuthStateChanged(auth, async (user) => {
+      window._fbAuthUser = user || null;
+      if (user) {
+        try {
+          const profile = await window.fbLoadUser(user.uid);
+          if (profile) {
+            window._fbPendingUser = profile;
+          }
+        } catch (e) {
+          console.error(e);
+        }
+      }
+      resolve(user);
+    });
+  });
+
+  console.log("Firebase Auth + Firestore ready");
 </script>
+
 
 </body>
 </html>
