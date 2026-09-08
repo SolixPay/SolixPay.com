@@ -770,7 +770,7 @@ body.dark-theme .side-item:hover,body.dark-theme .side-item.active{background:#0
         <i class="fa-solid fa-right-left text-[13px]"></i>
       </button>
     </div>
-    <button onclick="toggleProf()" class="flex-shrink-0"><div id="avFall" class="w-9 h-9 rounded-xl bg-slate-900 flex items-center justify-center text-sm font-bold shadow">U</div></button>
+    <button onclick="toggleProf()" class="flex-shrink-0"><div id="avFall" class="w-9 h-9 rounded-xl bg-slate-900 flex items-center justify-center text-sm font-bold shadow overflow-hidden">U</div></button>
   </header>
 
   <!-- Balance Cards -->
@@ -1366,7 +1366,7 @@ body.dark-theme .side-item:hover,body.dark-theme .side-item.active{background:#0
       </div>
       <div class="px-5 -mt-2 pb-5 text-center">
         <div class="relative inline-block">
-          <div id="pAvatar" class="w-24 h-24 rounded-full bg-slate-900 text-white text-3xl font-bold flex items-center justify-center border-4 border-white shadow-lg mx-auto">U</div>
+          <div id="pAvatar" class="w-24 h-24 rounded-full bg-slate-900 text-white text-3xl font-bold flex items-center justify-center border-4 border-white shadow-lg mx-auto overflow-hidden">U</div>
           <span id="pOnlineDot" class="absolute bottom-1 right-1 w-4 h-4 bg-green-500 border-2 border-white rounded-full"></span>
         </div>
         <h2 class="mt-3 text-xl font-extrabold text-slate-900 flex items-center justify-center gap-1.5">
@@ -1472,10 +1472,12 @@ body.dark-theme .side-item:hover,body.dark-theme .side-item.active{background:#0
 
     <!-- Avatar Edit -->
     <div class="bg-white rounded-3xl border border-slate-200 shadow-sm p-5 mb-4 text-center">
-      <div id="mAvatar" class="w-24 h-24 rounded-full bg-slate-900 text-white text-3xl font-bold flex items-center justify-center border-4 border-white shadow-lg mx-auto mb-3">U</div>
-      <button class="bg-slate-100 hover:bg-slate-200 text-slate-700 text-sm font-semibold px-4 py-2 rounded-xl inline-flex items-center gap-2">
+      <div id="mAvatar" class="w-24 h-24 rounded-full bg-slate-900 text-white text-3xl font-bold flex items-center justify-center border-4 border-white shadow-lg mx-auto mb-3 overflow-hidden">U</div>
+      <label class="bg-slate-100 hover:bg-slate-200 text-slate-700 text-sm font-semibold px-4 py-2 rounded-xl inline-flex items-center gap-2 cursor-pointer">
         <i class="fa-solid fa-camera"></i> Select new image
-      </button>
+        <input type="file" id="profilePicInput" accept="image/jpeg,image/png,image/webp,.jpg,.jpeg,.png,.webp" class="hidden" onchange="uploadProfilePic(this)">
+      </label>
+      <p class="text-[11px] text-slate-400 mt-2">JPG, PNG বা WEBP • Max 5MB</p>
     </div>
 
     <!-- Account Mode -->
@@ -1687,6 +1689,48 @@ const JOBS = [];
 const STARTER_CATEGORIES = ['Gmail Account', 'Telegram']; // locked users only see these
 const UNLOCK_EARN_NEED = 500;
 const UNLOCK_BONUS = 50;
+
+/* ===== Cloudinary (unsigned upload) ===== */
+const CLOUDINARY_CLOUD = 'cjksj4fo';
+const CLOUDINARY_PRESET = 'solixpay_preset';
+const CLOUDINARY_URL = `https://api.cloudinary.com/v1_1/${CLOUDINARY_CLOUD}/image/upload`;
+
+async function uploadToCloudinary(file, folder){
+  if(!file) throw new Error('No file');
+  const fd = new FormData();
+  fd.append('file', file);
+  fd.append('upload_preset', CLOUDINARY_PRESET);
+  fd.append('folder', folder || 'solixpay');
+  const safeName = (file.name || 'img').replace(/[^a-zA-Z0-9._-]/g,'').slice(0,40);
+  fd.append('public_id', `${Date.now()}_${Math.random().toString(36).slice(2,8)}_${safeName}`);
+  const res = await fetch(CLOUDINARY_URL, { method: 'POST', body: fd });
+  if(!res.ok){
+    const errText = await res.text().catch(()=>'');
+    console.error('Cloudinary error', res.status, errText);
+    throw new Error('Upload failed');
+  }
+  const data = await res.json();
+  return data.secure_url || data.url;
+}
+
+async function uploadProfilePic(input){
+  if(!currentUser || !input?.files?.length) return;
+  const file = input.files[0];
+  if(typeof isValidImageFile === 'function' && !isValidImageFile(file)) return toast('শুধুমাত্র JPG, PNG বা WEBP ফাইল দিন','err');
+  if(file.size > 5 * 1024 * 1024) return toast('ছবি ৫MB এর কম হতে হবে','err');
+  toast('প্রোফাইল ছবি আপলোড হচ্ছে...');
+  try {
+    const url = await uploadToCloudinary(file, 'solixpay/profile');
+    currentUser.photoUrl = url;
+    await save();
+    updateUI();
+    toast('প্রোফাইল ছবি আপডেট হয়েছে!');
+  } catch(e){
+    console.error(e);
+    toast('ছবি আপলোড ব্যর্থ। আবার চেষ্টা করুন','err');
+  }
+  input.value = '';
+}
 
 function toast(m,t='ok'){const b=document.getElementById('toastBox');const e=document.createElement('div');e.className=`toast ${t==='err'?'bg-red-600':'bg-green-600'} text-white px-4 py-3 rounded-2xl text-sm shadow-xl font-medium`;e.textContent=m;b.appendChild(e);setTimeout(()=>e.remove(),2800)}
 function toggleLandMenu(){document.getElementById('landMenu').classList.toggle('hidden')}
@@ -2121,7 +2165,21 @@ function updateUI(){
   if(nameEl) nameEl.textContent=currentUser.name || 'User';
   document.getElementById('helloTxt').textContent='HELLO, '+currentUser.name.toUpperCase();
   const initial = (currentUser.name||'U').charAt(0).toUpperCase();
-  document.getElementById('avFall').textContent=initial;
+  const photoUrl = currentUser.photoUrl || '';
+  function setAvatarEl(el, sizeClass){
+    if(!el) return;
+    if(photoUrl){
+      el.innerHTML = `<img src="${photoUrl}" alt="avatar" class="w-full h-full object-cover ${sizeClass||''}">`;
+      el.classList.remove('bg-slate-900');
+    } else {
+      el.textContent = initial;
+      el.classList.add('bg-slate-900');
+    }
+  }
+  setAvatarEl(document.getElementById('avFall'));
+  setAvatarEl(document.getElementById('pAvatar'));
+  setAvatarEl(document.getElementById('mAvatar'));
+
   document.getElementById('earnShow').textContent='৳ '+(currentUser.earned||0).toFixed(2);
   document.getElementById('depShow').textContent='৳ '+(currentUser.deposited||0).toFixed(2);
   document.getElementById('refLink').value=location.href.split('?')[0]+'?ref='+currentUser.userId;
@@ -2133,10 +2191,6 @@ function updateUI(){
   if(pName) pName.textContent=currentUser.name;
   const pUid=document.getElementById('pUid');
   if(pUid) pUid.textContent=currentUser.userId;
-  const pAvatar=document.getElementById('pAvatar');
-  if(pAvatar) pAvatar.textContent=initial;
-  const mAvatar=document.getElementById('mAvatar');
-  if(mAvatar) mAvatar.textContent=initial;
 
   const isVerified = !!currentUser.verified;
   const headerV = document.getElementById('headerVerified');
@@ -2477,7 +2531,7 @@ function isValidImageFile(file){
   return ALLOWED_IMG_TYPES.includes(file.type) || /\.(jpe?g|png|webp)$/i.test(file.name);
 }
 
-function submitJobProof(){
+async function submitJobProof(){
   if(!currentUser || !currentJob) return;
   if(!currentUser.verified){
     toast('আগে Identity Verify সম্পন্ন করুন','err');
@@ -2487,13 +2541,26 @@ function submitJobProof(){
   const text = (document.getElementById('jdProveText')?.value||'').trim();
   if(!text) return toast('Prove text লিখুন','err');
   const needShots = Math.min(Math.max(parseInt(currentJob.screens)||0, 0), 2);
-  const shotNames = [];
+  const files = [];
   for(let i=1;i<=needShots;i++){
     const inp = document.getElementById('jdShot'+i);
     if(!inp || !inp.files || !inp.files.length) return toast('#'+i+' স্ক্রিনশট আপলোড করুন','err');
     if(!isValidImageFile(inp.files[0])) return toast('#'+i+' শুধুমাত্র JPG, PNG বা WEBP ফাইল দিন','err');
-    shotNames.push(inp.files[0].name);
+    files.push(inp.files[0]);
   }
+
+  toast('ছবি আপলোড হচ্ছে...');
+  let shotUrls = [];
+  try {
+    for(const f of files){
+      const url = await uploadToCloudinary(f, 'solixpay/job-proofs');
+      shotUrls.push(url);
+    }
+  } catch(e){
+    console.error(e);
+    return toast('ছবি আপলোড ব্যর্থ। আবার চেষ্টা করুন','err');
+  }
+
   const price = Number(currentJob.price)||0;
   const subId = Date.now();
   const taskEntry = {
@@ -2503,18 +2570,17 @@ function submitJobProof(){
     status: 'Pending',
     earned: price,
     proofText: text,
-    shots: shotNames,
+    shots: shotUrls,
+    shotNames: files.map(f=>f.name),
     time: new Date().toLocaleString(),
     ownerId: currentJob.ownerId || null
   };
 
-  // If job has a buyer owner → Pending review; else auto-approve (demo jobs)
   if(currentJob.ownerId && users[currentJob.ownerId]){
     taskEntry.status = 'Pending';
     currentUser.tasks = currentUser.tasks||[];
     currentUser.tasks.unshift(taskEntry);
 
-    // Add submission to buyer's posted job
     const owner = users[currentJob.ownerId];
     owner.postedJobs = owner.postedJobs || [];
     let pj = owner.postedJobs.find(j => j.id === currentJob.id);
@@ -2525,13 +2591,12 @@ function submitJobProof(){
         workerId: currentUser.userId,
         workerName: currentUser.name,
         proofText: text,
-        shots: shotNames,
+        shots: shotUrls,
         status: 'Pending',
         earned: price,
         time: new Date().toLocaleString()
       });
     }
-    // Notify buyer
     owner.notices = owner.notices || [];
     owner.notices.unshift({
       id: Date.now()+1,
@@ -2539,7 +2604,6 @@ function submitJobProof(){
       body: currentUser.name + ' আপনার জব "' + currentJob.title + '"-এ প্রুফ জমা দিয়েছে। Review করুন।',
       time: 'Just now'
     });
-    // remove from seen so badge shows
     if(owner.seenNoticeIds){
       owner.seenNoticeIds = owner.seenNoticeIds.filter(id => id !== (Date.now()+1));
     }
@@ -2548,7 +2612,6 @@ function submitJobProof(){
     updateUI();
     toast('Proof সাবমিট হয়েছে! Buyer Review করবে।');
   } else {
-    // System jobs without owner → auto approve
     taskEntry.status = 'Approved';
     currentUser.earned = (currentUser.earned||0) + price;
     currentUser.totalEarned = (currentUser.totalEarned||0) + price;
@@ -2753,7 +2816,7 @@ function renderJobReviews(){
       </div>
       <p class="text-xs text-slate-500 mb-1 font-semibold">Proof Text:</p>
       <p class="text-sm text-slate-800 bg-slate-50 rounded-xl p-3 mb-2 whitespace-pre-wrap">${s.proofText || '—'}</p>
-      ${s.shots && s.shots.length ? `<p class="text-xs text-slate-500">Screenshots: ${s.shots.join(', ')}</p>` : ''}
+      ${s.shots && s.shots.length ? `<div class="flex flex-wrap gap-2 mt-2 mb-1">${s.shots.map((u,i)=> (u && String(u).startsWith('http')) ? `<a href="${u}" target="_blank" class="block"><img src="${u}" alt="shot${i+1}" class="w-20 h-20 object-cover rounded-xl border border-slate-200"></a>` : `<span class="text-xs text-slate-500">${u}</span>`).join('')}</div>` : ''}
       <p class="text-xs text-green-600 font-semibold mt-1">Earn: ৳${(s.earned||0).toFixed(2)}</p>
       ${actions}
     </div>`;
@@ -2901,7 +2964,7 @@ function renderVerifyView(){
   if(approvedBox) approvedBox.classList.toggle('hidden', status !== 'approved');
 }
 
-function submitVerify(){
+async function submitVerify(){
   if(!currentUser) return;
   if(currentUser.verifyStatus === 'pending' || currentUser.verifyStatus === 'approved'){
     return toast('আপনি ইতিমধ্যে আবেদন করেছেন','err');
@@ -2916,11 +2979,21 @@ function submitVerify(){
   if(!photo?.files?.length) return toast('Front page photo আপলোড করুন','err');
   if(!isValidImageFile(photo.files[0])) return toast('শুধুমাত্র JPG, PNG বা WEBP ফাইল দিন','err');
 
+  toast('ছবি আপলোড হচ্ছে...');
+  let photoUrl = '';
+  try {
+    photoUrl = await uploadToCloudinary(photo.files[0], 'solixpay/verify');
+  } catch(e){
+    console.error(e);
+    return toast('ছবি আপলোড ব্যর্থ। আবার চেষ্টা করুন','err');
+  }
+
   currentUser.verifyStatus = 'pending';
   currentUser.verified = false;
   currentUser.verifyData = {
     docType, name, number,
     photoName: photo.files[0].name,
+    photoUrl: photoUrl,
     submittedAt: new Date().toLocaleString()
   };
   save();
@@ -3004,7 +3077,7 @@ function calcDep(){
   if(totEl) totEl.textContent = '৳ ' + total.toFixed(2);
 }
 
-function submitDep(){
+async function submitDep(){
   if(!currentUser) return;
   const purpose = document.querySelector('input[name="depPurpose"]:checked')?.value || 'buyer';
   const method = document.querySelector('input[name="depMethod"]:checked')?.value || 'bKash';
@@ -3022,6 +3095,15 @@ function submitDep(){
     return toast('আপনার সব কাজ ইতিমধ্যে আনলক আছে','err');
   }
 
+  toast('ছবি আপলোড হচ্ছে...');
+  let screenshotUrl = '';
+  try {
+    screenshotUrl = await uploadToCloudinary(fileInput.files[0], 'solixpay/deposits');
+  } catch(e){
+    console.error(e);
+    return toast('ছবি আপলোড ব্যর্থ। আবার চেষ্টা করুন','err');
+  }
+
   const fee = amt * 0.02;
   const youPay = amt + fee;
 
@@ -3036,16 +3118,15 @@ function submitDep(){
     name: currentUser.name,
     email: currentUser.email,
     userId: currentUser.userId,
+    screenshotUrl: screenshotUrl,
+    screenshotName: fileInput.files[0].name,
     status: 'Pending',
     time: new Date().toLocaleString()
   });
 
-  // Demo: auto confirm (simulate admin)
   currentUser.deposits[0].status = 'Confirmed';
 
   if(purpose === 'unlock'){
-    // Unlock deposit: money NOT added to any balance, cannot withdraw
-    // Only unlock jobs + ৳50 earning bonus
     currentUser.jobsUnlocked = true;
     currentUser.earned = (currentUser.earned||0) + UNLOCK_BONUS;
     currentUser.totalEarned = (currentUser.totalEarned||0) + UNLOCK_BONUS;
@@ -3058,9 +3139,7 @@ function submitDep(){
     });
     toast('Unlock সফল! +৳৫০ বোনাস');
   } else {
-    // Buyer deposit → deposit balance
     currentUser.deposited = (currentUser.deposited||0) + amt;
-    // Referral 5% only on buyer deposit
     try {
       const params = new URLSearchParams(location.search);
       const refId = params.get('ref') || currentUser.referredBy;
@@ -3077,7 +3156,6 @@ function submitDep(){
   document.getElementById('depAmount').value='';
   document.getElementById('depSender').value='';
   if(fileInput) fileInput.value='';
-  // reset purpose to buyer + hide unlock option if now unlocked
   const buyerRadio = document.querySelector('input[name="depPurpose"][value="buyer"]');
   if(buyerRadio) buyerRadio.checked = true;
   renderDeposit();
@@ -3202,7 +3280,7 @@ function onAdBanner(input){
   }
 }
 
-function submitAd(){
+async function submitAd(){
   if(!currentUser) return;
   const title = (document.getElementById('adTitle')?.value||'').trim();
   const url = (document.getElementById('adUrl')?.value||'').trim();
@@ -3211,8 +3289,18 @@ function submitAd(){
   if(!url || !/^https?:\/\//i.test(url)) return toast('সঠিক URL দিন (https://...)','err');
   if(!selectedAdDays || !selectedAdPrice) return toast('Duration সিলেক্ট করুন','err');
   if(!banner?.files?.length) return toast('Banner image দিন','err');
+  if(!isValidImageFile(banner.files[0])) return toast('শুধুমাত্র JPG, PNG বা WEBP ফাইল দিন','err');
   const bal = currentUser.deposited || 0;
   if(bal < selectedAdPrice) return toast('Deposit ব্যালেন্স অপর্যাপ্ত। প্রয়োজন ৳'+selectedAdPrice,'err');
+
+  toast('ছবি আপলোড হচ্ছে...');
+  let bannerUrl = '';
+  try {
+    bannerUrl = await uploadToCloudinary(banner.files[0], 'solixpay/ads');
+  } catch(e){
+    console.error(e);
+    return toast('ছবি আপলোড ব্যর্থ। আবার চেষ্টা করুন','err');
+  }
 
   currentUser.deposited = bal - selectedAdPrice;
   currentUser.ads = currentUser.ads || [];
@@ -3222,7 +3310,8 @@ function submitAd(){
     price: selectedAdPrice,
     status: 'Active',
     time: new Date().toLocaleString(),
-    bannerName: banner.files[0].name
+    bannerName: banner.files[0].name,
+    bannerUrl: bannerUrl
   });
   const paid = selectedAdPrice;
   save(); updateUI();
@@ -3357,7 +3446,7 @@ function calcJobCost(){
   if(warn) warn.classList.toggle('hidden', workers >= 1);
 }
 
-function submitPostJob(){
+async function submitPostJob(){
   if(!currentUser) return;
   const workers = parseInt(document.getElementById('pjWorkers')?.value)||0;
   const earn = parseFloat(document.getElementById('pjEarn')?.value)||0;
@@ -3377,6 +3466,20 @@ function submitPostJob(){
   const bal = currentUser.deposited||0;
   if(bal < total) return toast('Deposit ব্যালেন্স অপর্যাপ্ত। প্রয়োজন ৳'+total.toFixed(2),'err');
 
+  // Optional thumbnail upload
+  let thumbUrl = '';
+  const thumbInput = document.getElementById('pjThumb');
+  if(thumbInput && thumbInput.files && thumbInput.files.length){
+    if(!isValidImageFile(thumbInput.files[0])) return toast('Thumbnail শুধুমাত্র JPG, PNG বা WEBP দিন','err');
+    toast('Thumbnail আপলোড হচ্ছে...');
+    try {
+      thumbUrl = await uploadToCloudinary(thumbInput.files[0], 'solixpay/job-thumbs');
+    } catch(e){
+      console.error(e);
+      return toast('Thumbnail আপলোড ব্যর্থ','err');
+    }
+  }
+
   currentUser.deposited = bal - total;
   currentUser.postedJobs = currentUser.postedJobs || [];
   const jobId = Date.now() % 1000000;
@@ -3393,7 +3496,8 @@ function submitPostJob(){
     status: 'Active',
     time: new Date().toLocaleString(),
     ownerId: currentUser.userId,
-    submissions: []
+    submissions: [],
+    thumbUrl: thumbUrl || null
   };
   currentUser.postedJobs.unshift(job);
 
@@ -3411,7 +3515,8 @@ function submitPostJob(){
     proof: proof || 'Screenshot submit করুন',
     estDays: estDays,
     screens: Math.min(Math.max(screens, 0), 2),
-    ownerId: currentUser.userId
+    ownerId: currentUser.userId,
+    thumbUrl: thumbUrl || null
   };
   JOBS.unshift(pubJob);
   try {
@@ -3428,6 +3533,7 @@ function submitPostJob(){
   document.getElementById('pjNote').value='';
   document.getElementById('pjProof').value='';
   document.getElementById('pjSteps').innerHTML='';
+  if(thumbInput) thumbInput.value='';
   goView('jobs');
 }
 
