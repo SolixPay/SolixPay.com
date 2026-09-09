@@ -39,7 +39,7 @@ function sendChat(){
   box.innerHTML += `<div class="flex gap-2 justify-end"><div class="bg-green-600 text-white rounded-2xl rounded-tr-sm px-3 py-2 text-sm max-w-[80%]">${msg}</div></div>`;
   try {
     const list = JSON.parse(localStorage.getItem('solix_chats')||'[]');
-    list.push({fromId: (currentUser&& (currentUser.authUid||currentUser.userId))||'guest', fromName:(currentUser&&currentUser.name)||'Guest', to:'admin', text:msg, time:new Date().toLocaleString(), unread:true, fromAdmin:false});
+    list.push({fromId: (currentUser&& (currentUser.authUid||currentUser.userId))||'guest', fromName:(currentUser&&currentUser.name)||'Guest', to:'admin', text:msg, time:new Date().toLocaleString(), ts:Date.now(), unread:true, fromAdmin:false});
     localStorage.setItem('solix_chats', JSON.stringify(list));
   } catch(e){}
 
@@ -697,7 +697,13 @@ body.dark-theme .side-item:hover,body.dark-theme .side-item.active{background:#0
           <div id="forgotBox">
             <label class="block text-sm font-semibold text-slate-700 mb-1.5">Gmail</label>
             <input type="email" id="forgotEmail" class="w-full border-2 border-green-200 rounded-xl px-4 py-3 text-sm bg-white focus:outline-none focus:border-green-500 mb-5" placeholder="name@gmail.com">
-            <button onclick="doForgot()" class="w-full bg-green-600 hover:bg-green-700 text-white font-bold py-3.5 rounded-xl shadow-lg shadow-green-600/30 transition">Search Account</button>
+            <button id="forgotResetBtn" onclick="prepareForgot()" class="w-full bg-green-600 hover:bg-green-700 text-white font-bold py-3.5 rounded-xl shadow-lg shadow-green-600/30 transition">Password Reset</button>
+            <div id="forgotConfirmBox" class="hidden mt-3">
+              <p class="text-sm text-slate-600 text-center mb-3">Reset লিংক Email-এ পাঠানো হবে। নিশ্চিত?</p>
+              <button onclick="doForgot()" class="w-full bg-emerald-600 hover:bg-emerald-700 text-white font-bold py-3.5 rounded-xl">OK</button>
+              <button onclick="cancelForgot()" class="w-full mt-2 border border-slate-200 text-slate-600 font-semibold py-2.5 rounded-xl text-sm">Cancel</button>
+            </div>
+            <p id="forgotCooldownMsg" class="hidden text-center text-xs text-amber-600 font-medium mt-3"></p>
             <p class="text-center text-sm mt-5 font-medium">
               <a href="#" onclick="showAuth('login')" class="text-green-600 hover:underline">Back to Login</a>
             </p>
@@ -2157,12 +2163,50 @@ async function doLogin(){
 }
 
 
+function prepareForgot(){
+  const e=document.getElementById('forgotEmail').value.trim().toLowerCase();
+  if(!e) return toast('Gmail দিন','err');
+  // cooldown check
+  try {
+    const map = JSON.parse(localStorage.getItem('solix_reset_cd')||'{}');
+    const last = map[e] || 0;
+    const left = 5*60*1000 - (Date.now() - last);
+    if(left > 0){
+      const sec = Math.ceil(left/1000);
+      const m = Math.floor(sec/60), s = sec%60;
+      const msg = document.getElementById('forgotCooldownMsg');
+      if(msg){ msg.textContent = 'আবার Reset করতে অপেক্ষা করুন: '+m+' মিনিট '+s+' সেকেন্ড'; msg.classList.remove('hidden'); }
+      return toast('৫ মিনিট অপেক্ষা করুন','err');
+    }
+  } catch(err){}
+  document.getElementById('forgotConfirmBox')?.classList.remove('hidden');
+  document.getElementById('forgotResetBtn')?.classList.add('hidden');
+  document.getElementById('forgotCooldownMsg')?.classList.add('hidden');
+}
+function cancelForgot(){
+  document.getElementById('forgotConfirmBox')?.classList.add('hidden');
+  document.getElementById('forgotResetBtn')?.classList.remove('hidden');
+}
 async function doForgot(){
   const e=document.getElementById('forgotEmail').value.trim().toLowerCase();
   if(!e) return toast('Gmail দিন','err');
-  if(!window.fbResetPassword) return toast('Firebase লোড হচ্ছে...','err');
+  // cooldown again
+  try {
+    const map = JSON.parse(localStorage.getItem('solix_reset_cd')||'{}');
+    const last = map[e] || 0;
+    if(Date.now() - last < 5*60*1000) return toast('৫ মিনিট অপেক্ষা করুন','err');
+  } catch(err){}
+  if(!window.fbResetPassword) return toast('সিস্টেম লোড হচ্ছে, একটু অপেক্ষা করুন','err');
   try {
     await window.fbResetPassword(e);
+    // set cooldown
+    try {
+      const map = JSON.parse(localStorage.getItem('solix_reset_cd')||'{}');
+      map[e] = Date.now();
+      localStorage.setItem('solix_reset_cd', JSON.stringify(map));
+    } catch(err){}
+    document.getElementById('forgotConfirmBox')?.classList.add('hidden');
+    document.getElementById('forgotResetBtn')?.classList.remove('hidden');
     toast('Password reset লিংক Email-এ পাঠানো হয়েছে');
   } catch(err) {
     console.error(err);
@@ -3711,6 +3755,35 @@ document.addEventListener('click',e=>{
 });
 
 /* ===================== ADMIN PANEL ===================== */
+
+/* Admin two-step confirm */
+function adminConfirm(message, onOk){
+  let modal = document.getElementById('adminConfirmModal');
+  if(!modal){
+    modal = document.createElement('div');
+    modal.id = 'adminConfirmModal';
+    modal.className = 'fixed inset-0 z-[80] hidden flex items-center justify-center p-4';
+    modal.innerHTML = `<div class="absolute inset-0 bg-black/50" onclick="document.getElementById('adminConfirmModal').classList.add('hidden')"></div>
+      <div class="relative bg-white rounded-3xl shadow-2xl w-full max-w-sm p-5 z-10 border border-slate-200">
+        <p class="text-slate-800 font-semibold text-center mb-4" id="adminConfirmMsg">Confirm?</p>
+        <div class="flex gap-2">
+          <button id="adminConfirmOk" class="flex-1 bg-green-600 hover:bg-green-700 text-white font-bold py-3 rounded-xl">OK</button>
+          <button onclick="document.getElementById('adminConfirmModal').classList.add('hidden')" class="flex-1 border border-slate-200 text-slate-600 font-semibold py-3 rounded-xl">Cancel</button>
+        </div>
+      </div>`;
+    document.body.appendChild(modal);
+  }
+  document.getElementById('adminConfirmMsg').textContent = message || 'আপনি কি নিশ্চিত?';
+  const okBtn = document.getElementById('adminConfirmOk');
+  const newBtn = okBtn.cloneNode(true);
+  okBtn.parentNode.replaceChild(newBtn, okBtn);
+  newBtn.addEventListener('click', function(){
+    document.getElementById('adminConfirmModal').classList.add('hidden');
+    if(typeof onOk === 'function') onOk();
+  });
+  modal.classList.remove('hidden');
+}
+
 function initAdmin(){
   document.getElementById('landing').classList.add('hidden');
   document.getElementById('authSection').classList.add('hidden');
@@ -3792,7 +3865,7 @@ function renderAdminUsers(){
         <div class="bg-slate-50 rounded-lg p-2 text-center"><p class="text-slate-400">Tasks</p><p class="font-bold">${(u.tasks||[]).length}</p></div>
       </div>
       <div class="flex flex-wrap gap-2">
-        <button onclick="adminToggleBan('${u.userId}')" class="text-[11px] px-3 py-1.5 rounded-lg font-semibold ${u.banned?'bg-green-100 text-green-700':'bg-red-100 text-red-600'}">${u.banned?'Unban':'Ban'}</button>
+        <button onclick="adminConfirm('Ban/Unban confirm করবেন?',()=>adminToggleBan('${u.userId}'))" class="text-[11px] px-3 py-1.5 rounded-lg font-semibold ${u.banned?'bg-green-100 text-green-700':'bg-red-100 text-red-600'}">${u.banned?'Unban':'Ban'}</button>
         <button onclick="adminAdjustBalance('${u.userId}')" class="text-[11px] px-3 py-1.5 rounded-lg font-semibold bg-blue-100 text-blue-700">Balance</button>
       </div>
     </div>`;
@@ -3807,7 +3880,16 @@ function adminToggleBan(uid){
   renderAdminUsers();
   toast(u.banned ? 'User Banned' : 'User Unbanned');
 }
- else {
+function adminAdjustBalance(uid){
+  const u = users[uid]; if(!u) return;
+  const type = prompt('Type: earn or deposit');
+  if(!type) return;
+  const amt = parseFloat(prompt('Amount (positive or negative):'));
+  if(isNaN(amt)) return;
+  if(type.toLowerCase().includes('earn')){
+    u.earned = (u.earned||0) + amt;
+    u.totalEarned = (u.totalEarned||0) + Math.max(0,amt);
+  } else {
     u.deposited = (u.deposited||0) + amt;
   }
   localStorage.setItem('solix_users', JSON.stringify(users));
@@ -3848,8 +3930,8 @@ function renderAdminDeposits(){
     const st = d.status||'Pending';
     const badge = st==='Confirmed'?'bg-green-100 text-green-700':st==='Rejected'?'bg-red-100 text-red-600':'bg-amber-100 text-amber-700';
     const actions = st==='Pending' ? `
-      <button onclick="adminApproveDep('${d._uid}',${d._idx})" class="flex-1 bg-green-600 text-white text-xs font-bold py-2 rounded-xl">Approve</button>
-      <button onclick="adminRejectDep('${d._uid}',${d._idx})" class="flex-1 bg-red-500 text-white text-xs font-bold py-2 rounded-xl">Reject</button>` : '';
+      <button onclick="adminConfirm('Deposit Approve করবেন?',()=>adminApproveDep('${d._uid}',${d._idx}))" class="flex-1 bg-green-600 text-white text-xs font-bold py-2 rounded-xl">Approve</button>
+      <button onclick="adminConfirm('Deposit Reject করবেন?',()=>adminRejectDep('${d._uid}',${d._idx}))" class="flex-1 bg-red-500 text-white text-xs font-bold py-2 rounded-xl">Reject</button>` : '';
     return `<div class="bg-white rounded-2xl border border-slate-200 p-4 shadow-sm">
       <div class="flex justify-between mb-2">
         <div>
@@ -3919,8 +4001,8 @@ function renderAdminWithdraws(){
     const st = w.status||'Pending';
     const badge = st==='Accepted'||st==='Confirmed'?'bg-green-100 text-green-700':st==='Rejected'?'bg-red-100 text-red-600':'bg-amber-100 text-amber-700';
     const actions = st==='Pending' ? `
-      <button onclick="adminApproveWd('${w._uid}',${w._idx})" class="flex-1 bg-green-600 text-white text-xs font-bold py-2 rounded-xl">Approve & Pay</button>
-      <button onclick="adminRejectWd('${w._uid}',${w._idx})" class="flex-1 bg-red-500 text-white text-xs font-bold py-2 rounded-xl">Reject (Refund)</button>` : '';
+      <button onclick="adminConfirm('Withdraw Approve করবেন?',()=>adminApproveWd('${w._uid}',${w._idx}))" class="flex-1 bg-green-600 text-white text-xs font-bold py-2 rounded-xl">Approve & Pay</button>
+      <button onclick="adminConfirm('Withdraw Reject + Refund?',()=>adminRejectWd('${w._uid}',${w._idx}))" class="flex-1 bg-red-500 text-white text-xs font-bold py-2 rounded-xl">Reject (Refund)</button>` : '';
     return `<div class="bg-white rounded-2xl border border-slate-200 p-4 shadow-sm">
       <div class="flex justify-between mb-2">
         <div>
@@ -3974,8 +4056,8 @@ function renderAdminVerifications(){
     const badge = st==='approved'?'bg-green-100 text-green-700':st==='pending'?'bg-amber-100 text-amber-700':'bg-slate-100 text-slate-500';
     const vd = u.verifyData || {};
     const actions = st==='pending' ? `
-      <button onclick="adminApproveVerify('${u.userId}')" class="flex-1 bg-green-600 text-white text-xs font-bold py-2 rounded-xl">Approve</button>
-      <button onclick="adminRejectVerify('${u.userId}')" class="flex-1 bg-red-500 text-white text-xs font-bold py-2 rounded-xl">Reject</button>` : '';
+      <button onclick="adminConfirm('Verify Approve করবেন?',()=>adminApproveVerify('${u.userId}'))" class="flex-1 bg-green-600 text-white text-xs font-bold py-2 rounded-xl">Approve</button>
+      <button onclick="adminConfirm('Verify Reject করবেন?',()=>adminRejectVerify('${u.userId}'))" class="flex-1 bg-red-500 text-white text-xs font-bold py-2 rounded-xl">Reject</button>` : '';
     return `<div class="bg-white rounded-2xl border border-slate-200 p-4 shadow-sm">
       <div class="flex justify-between mb-2">
         <div>
@@ -4033,7 +4115,7 @@ function renderAdminJobs(){
       </div>
       <p class="text-xs text-slate-500 mb-2">${j.done||0}/${j.total||0} • ${j.category||''} • ${j.zone||''} • Owner: ${j.ownerId||'System'}</p>
       <div class="flex gap-2">
-        <button onclick="adminDeleteJob(${i})" class="text-[11px] px-3 py-1.5 rounded-lg font-semibold bg-red-100 text-red-600">Delete</button>
+        <button onclick="adminConfirm('এই Job Delete করবেন?',()=>adminDeleteJob(${i}))" class="text-[11px] px-3 py-1.5 rounded-lg font-semibold bg-red-100 text-red-600">Delete</button>
         <button onclick="adminEditJobPrice(${i})" class="text-[11px] px-3 py-1.5 rounded-lg font-semibold bg-blue-100 text-blue-700">Edit Price</button>
       </div>
     </div>`;
@@ -4114,8 +4196,8 @@ function renderAdminAds(){
     const st = a.status||'Pending';
     const badge = st==='Active'?'bg-green-100 text-green-700':st==='Rejected'?'bg-red-100 text-red-600':'bg-amber-100 text-amber-700';
     const actions = st==='Pending' ? `
-      <button onclick="adminApproveAd('${a._uid}',${a._idx})" class="flex-1 bg-green-600 text-white text-xs font-bold py-2 rounded-xl">Approve</button>
-      <button onclick="adminRejectAd('${a._uid}',${a._idx})" class="flex-1 bg-red-500 text-white text-xs font-bold py-2 rounded-xl">Reject (Refund)</button>` : '';
+      <button onclick="adminConfirm('Ad Approve করবেন?',()=>adminApproveAd('${a._uid}',${a._idx}))" class="flex-1 bg-green-600 text-white text-xs font-bold py-2 rounded-xl">Approve</button>
+      <button onclick="adminConfirm('Ad Reject + Refund?',()=>adminRejectAd('${a._uid}',${a._idx}))" class="flex-1 bg-red-500 text-white text-xs font-bold py-2 rounded-xl">Reject (Refund)</button>` : '';
     return `<div class="bg-white rounded-2xl border border-slate-200 p-4 shadow-sm">
       <div class="flex justify-between mb-2">
         <div>
@@ -4214,25 +4296,289 @@ function saveSiteContent(){
 }
 function applySiteContent(){
   const c = getSiteContent();
-  // Apply social links if present
-  if(c.facebook){
-    document.querySelectorAll('a[href="#"]').forEach(a=>{
-      if(a.querySelector('.fa-facebook-f')) a.href = c.facebook;
-    });
-  }
-  if(c.telegram){
-    document.querySelectorAll('a[href="#"]').forEach(a=>{
-      if(a.querySelector('.fa-telegram')) a.href = c.telegram;
-    });
-  }
-  if(c.youtube){
-    document.querySelectorAll('a[href="#"]').forEach(a=>{
-      if(a.querySelector('.fa-youtube')) a.href = c.youtube;
-    });
-  }
+  try {
+    if(c.facebook){ document.querySelectorAll('a').forEach(a=>{ if(a.querySelector && a.querySelector('.fa-facebook-f')) a.href = c.facebook; }); }
+    if(c.telegram){ document.querySelectorAll('a').forEach(a=>{ if(a.querySelector && a.querySelector('.fa-telegram')) a.href = c.telegram; }); }
+    if(c.youtube){ document.querySelectorAll('a').forEach(a=>{ if(a.querySelector && a.querySelector('.fa-youtube')) a.href = c.youtube; }); }
+    const ticker = document.querySelector('.ticker-wrap');
+    if(ticker && (c.notice1||c.notice2||c.notice3||c.notice4)){
+      const lines = [c.notice1,c.notice2,c.notice3,c.notice4].filter(Boolean);
+      if(lines.length){
+        let html = '';
+        lines.forEach(l => html += '<span class="inline-block px-4">'+l+'</span>');
+        lines.forEach(l => html += '<span class="inline-block px-4">'+l+'</span>');
+        ticker.innerHTML = html;
+      }
+    }
+  } catch(e){}
 }
-// Apply on load
-document.addEventListener('DOMContentLoaded', ()=>{ try{ applySiteContent(); }catch(e){} });
+
+function getChatStore(){
+  try { return JSON.parse(localStorage.getItem('solix_chats')||'[]'); } catch(e){ return []; }
+}
+function saveChatStore(list){
+  localStorage.setItem('solix_chats', JSON.stringify(list));
+}
+
+function renderAdminChat(){
+  const el = document.getElementById('adminChatList');
+  if(!el) return;
+  let list = getChatStore();
+  // sort by time descending (newest first) - use stored ts if any
+  list = list.slice().sort((a,b)=>{
+    const ta = a.ts || Date.parse(a.time) || 0;
+    const tb = b.ts || Date.parse(b.time) || 0;
+    return tb - ta;
+  });
+  if(!list.length){ el.innerHTML='<p class="text-slate-400 text-center py-6">No messages yet</p>'; return; }
+  // map original index for edit/delete
+  const store = getChatStore();
+  el.innerHTML = list.map((m)=>{
+    const realIdx = store.findIndex(x => x === m || (x.ts===m.ts && x.text===m.text && x.fromId===m.fromId));
+    const idx = realIdx >= 0 ? realIdx : store.indexOf(m);
+    const unread = m.unread ? '<span class="w-2 h-2 bg-red-500 rounded-full inline-block ml-1"></span>' : '';
+    const who = m.fromAdmin ? 'Admin' : (m.fromName||m.fromId||'User');
+    return `<div class="bg-white rounded-2xl border border-slate-200 p-3 shadow-sm ${m.unread?'border-red-300':''}" data-chat-idx="${idx}">
+      <div class="flex justify-between text-xs text-slate-500 mb-1">
+        <span class="font-semibold text-slate-800">${who} ${unread}</span>
+        <span>${m.time||''}</span>
+      </div>
+      <p class="text-sm text-slate-800 chat-text" id="chatText${idx}">${(m.text||'').replace(/</g,'&lt;')}</p>
+      <p class="text-[10px] text-slate-400 mt-1">To: ${m.to||'Admin'} • ID: ${m.fromId||''}</p>
+      <div class="flex flex-wrap gap-2 mt-2">
+        <button onclick="adminChatMarkSeen(${idx})" class="text-[10px] text-green-600 font-semibold px-2 py-1 rounded-lg bg-green-50">Seen</button>
+        <button onclick="adminChatEdit(${idx})" class="text-[10px] text-blue-600 font-semibold px-2 py-1 rounded-lg bg-blue-50">Edit</button>
+        <button onclick="adminConfirm('এই মেসেজ Delete করবেন?',()=>adminChatDelete(${idx}))" class="text-[10px] text-red-600 font-semibold px-2 py-1 rounded-lg bg-red-50">Delete</button>
+      </div>
+    </div>`;
+  }).join('');
+}
+function adminChatEdit(idx){
+  const list = getChatStore();
+  if(!list[idx]) return;
+  const neu = prompt('Edit message:', list[idx].text||'');
+  if(neu === null) return;
+  if(!neu.trim()) return toast('মেসেজ খালি রাখা যাবে না','err');
+  adminConfirm('মেসেজ আপডেট করবেন?', ()=>{
+    list[idx].text = neu.trim();
+    list[idx].edited = true;
+    list[idx].time = (list[idx].time||'') + ' (edited)';
+    saveChatStore(list);
+    renderAdminChat();
+    toast('Message updated');
+  });
+}
+function adminChatDelete(idx){
+  const list = getChatStore();
+  if(idx < 0 || idx >= list.length) return;
+  list.splice(idx, 1);
+  saveChatStore(list);
+  renderAdminChat();
+  toast('Message deleted');
+}
+
+function adminSendChat(){
+  const to = document.getElementById('adminChatTo')?.value?.trim();
+  const text = document.getElementById('adminChatMsg')?.value?.trim();
+  if(!to || !text) return toast('User ID ও মেসেজ দিন','err');
+  const list = getChatStore();
+  list.push({fromId:'admin', fromName:'Admin', to:to, text:text, time:new Date().toLocaleString(), ts:Date.now(), unread:false, fromAdmin:true});
+  saveChatStore(list);
+  // push notice to user if exists
+  const u = Object.values(users).find(x => x.userId===to || x.authUid===to);
+  if(u){
+    u.notices = u.notices||[];
+    u.notices.unshift({id:Date.now(), title:'Support Reply', body:text, time:new Date().toLocaleString()});
+    u.chatUnread = true;
+    localStorage.setItem('solix_users', JSON.stringify(users));
+  }
+  document.getElementById('adminChatMsg').value='';
+  renderAdminChat();
+  toast('Reply sent');
+}
+
+
+function getRewardConfig(){
+  try { return JSON.parse(localStorage.getItem('solix_reward')||'null'); } catch(e){ return null; }
+}
+function getRewardClaims(){
+  try { return JSON.parse(localStorage.getItem('solix_reward_claims')||'[]'); } catch(e){ return []; }
+}
+function saveRewardClaims(list){
+  localStorage.setItem('solix_reward_claims', JSON.stringify(list));
+}
+function renderRewards(){
+  const box = document.getElementById('rewardsBox');
+  if(!box) return;
+  const r = getRewardConfig();
+  if(!r || !r.active){
+    box.innerHTML = '<div class="text-center py-8 text-slate-400 text-sm">আজকের কোনো রিওয়ার্ড টাস্ক নেই। পরে আবার চেক করুন।</div>';
+    return;
+  }
+  const uid = currentUser ? (currentUser.authUid || currentUser.userId) : '';
+  const claims = getRewardClaims();
+  const myClaim = claims.find(x => x.userId === uid && x.taskId === r.id);
+  let statusHtml = '';
+  if(myClaim){
+    if(myClaim.status === 'Pending') statusHtml = '<p class="text-amber-600 text-sm font-semibold mt-3">আপনার Claim Pending আছে। Admin Approve করলে রিওয়ার্ড পাবেন।</p>';
+    else if(myClaim.status === 'Approved') statusHtml = '<p class="text-green-600 text-sm font-semibold mt-3">✅ রিওয়ার্ড পেয়েছেন: ৳'+(myClaim.amount||0).toFixed(2)+'</p>';
+    else if(myClaim.status === 'Rejected') statusHtml = '<p class="text-red-500 text-sm font-semibold mt-3">Claim Reject হয়েছে।</p>';
+  }
+  const linkBtn = r.link ? '<a href="'+r.link+'" target="_blank" class="block w-full text-center bg-slate-900 text-white font-bold py-3 rounded-xl mb-3">কাজটি করুন (লিংক)</a>' : '';
+  const claimBtn = (!myClaim || myClaim.status === 'Rejected') ? '<button onclick="claimReward()" class="w-full bg-green-600 hover:bg-green-700 text-white font-bold py-3 rounded-xl">কাজ সম্পন্ন — Claim Reward</button>' : '';
+  box.innerHTML = `
+    <div class="text-center mb-3">
+      <div class="w-14 h-14 mx-auto rounded-2xl bg-green-50 flex items-center justify-center mb-2"><i class="fa-solid fa-gift text-2xl text-green-600"></i></div>
+      <h3 class="font-extrabold text-slate-900 text-lg">${r.title||'Reward Task'}</h3>
+      <p class="text-green-600 font-bold text-xl mt-1">৳ ${Number(r.amount||0).toFixed(2)}</p>
+    </div>
+    <div class="bg-slate-50 rounded-2xl p-4 text-sm text-slate-700 leading-relaxed whitespace-pre-wrap mb-4">${r.body||''}</div>
+    ${linkBtn}
+    ${claimBtn}
+    ${statusHtml}
+    <p class="text-[10px] text-slate-400 mt-3 text-center">Updated: ${r.updated||'—'}</p>
+  `;
+}
+function claimReward(){
+  if(!currentUser) return toast('লগইন করুন','err');
+  const r = getRewardConfig();
+  if(!r || !r.active) return toast('কোনো Active রিওয়ার্ড নেই','err');
+  const uid = currentUser.authUid || currentUser.userId;
+  const claims = getRewardClaims();
+  if(claims.some(x => x.userId === uid && x.taskId === r.id && x.status !== 'Rejected')){
+    return toast('আপনি ইতিমধ্যে Claim করেছেন','err');
+  }
+  claims.unshift({
+    id: Date.now(),
+    taskId: r.id,
+    taskTitle: r.title,
+    userId: uid,
+    userName: currentUser.name,
+    amount: Number(r.amount)||0,
+    status: 'Pending',
+    time: new Date().toLocaleString(),
+    unread: true
+  });
+  saveRewardClaims(claims);
+  currentUser.notices = currentUser.notices || [];
+  currentUser.notices.unshift({
+    id: Date.now(),
+    title: 'Reward Claim Submitted',
+    body: 'আপনার রিওয়ার্ড Claim সাবমিট হয়েছে। Admin Approve করলে ৳'+(Number(r.amount)||0).toFixed(2)+' পাবেন।',
+    time: new Date().toLocaleString()
+  });
+  save();
+  renderRewards();
+  toast('Claim সাবমিট! Admin Approve-এর অপেক্ষায়।');
+}
+function renderAdminRewards(){
+  const r = getRewardConfig() || {};
+  const set = (id,v)=>{ const e=document.getElementById(id); if(e) e.value = v||''; };
+  set('admRewardTitle', r.title);
+  set('admRewardBody', r.body);
+  set('admRewardLink', r.link);
+  set('admRewardAmount', r.amount);
+  const act = document.getElementById('admRewardActive');
+  if(act) act.checked = r.active !== false;
+
+  const el = document.getElementById('adminRewardClaims');
+  if(!el) return;
+  const claims = getRewardClaims();
+  if(!claims.length){ el.innerHTML='<p class="text-slate-400 text-center py-6 text-sm">No claims yet</p>'; return; }
+  el.innerHTML = claims.map((cl,i)=>{
+    const st = cl.status||'Pending';
+    const badge = st==='Approved'?'bg-green-100 text-green-700':st==='Rejected'?'bg-red-100 text-red-600':'bg-amber-100 text-amber-700';
+    const actions = st==='Pending' ? `
+      <button onclick="adminConfirm('Reward Approve করবেন?',()=>adminApproveReward(${i}))" class="flex-1 bg-green-600 text-white text-xs font-bold py-2 rounded-xl">Approve</button>
+      <button onclick="adminConfirm('Reward Reject করবেন?',()=>adminRejectReward(${i}))" class="flex-1 bg-red-500 text-white text-xs font-bold py-2 rounded-xl">Reject</button>` : '';
+    const red = cl.unread ? '<span class="w-2 h-2 bg-red-500 rounded-full inline-block"></span>' : '';
+    return `<div class="bg-white rounded-2xl border border-slate-200 p-4 shadow-sm">
+      <div class="flex justify-between mb-1">
+        <p class="font-bold text-sm text-slate-900">${cl.userName||cl.userId} ${red}</p>
+        <span class="text-[10px] font-bold px-2 py-0.5 rounded-full ${badge}">${st}</span>
+      </div>
+      <p class="text-xs text-slate-500">${cl.taskTitle||''} • ৳${(cl.amount||0).toFixed(2)}</p>
+      <p class="text-[10px] text-slate-400 mb-2">${cl.time||''}</p>
+      <div class="flex gap-2">${actions}</div>
+    </div>`;
+  }).join('');
+}
+function saveAdminReward(){
+  const title = document.getElementById('admRewardTitle')?.value?.trim();
+  const body = document.getElementById('admRewardBody')?.value?.trim();
+  const link = document.getElementById('admRewardLink')?.value?.trim();
+  const amount = parseFloat(document.getElementById('admRewardAmount')?.value)||0;
+  const active = !!document.getElementById('admRewardActive')?.checked;
+  if(!title) return toast('Title দিন','err');
+  if(amount < 1) return toast('Reward Amount কমপক্ষে ৳1','err');
+  const cfg = {
+    id: Date.now(),
+    title, body, link, amount, active,
+    updated: new Date().toLocaleString()
+  };
+  localStorage.setItem('solix_reward', JSON.stringify(cfg));
+  toast('Reward Task Saved!');
+  renderAdminRewards();
+}
+function adminApproveReward(i){
+  const claims = getRewardClaims();
+  const cl = claims[i];
+  if(!cl || cl.status !== 'Pending') return;
+  cl.status = 'Approved';
+  cl.unread = false;
+  // credit user
+  let u = users[cl.userId] || Object.values(users).find(x => x.authUid === cl.userId || x.userId === cl.userId);
+  if(u){
+    u.earned = (u.earned||0) + (cl.amount||0);
+    u.totalEarned = (u.totalEarned||0) + (cl.amount||0);
+    u.notices = u.notices||[];
+    u.notices.unshift({id:Date.now(), title:'Reward Approved!', body:'আপনি রিওয়ার্ড পেয়েছেন: ৳'+(cl.amount||0).toFixed(2), time:new Date().toLocaleString()});
+    users[u.userId] = u;
+    localStorage.setItem('solix_users', JSON.stringify(users));
+    if(window.fbSaveUser && u.authUid) window.fbSaveUser(u);
+  }
+  saveRewardClaims(claims);
+  renderAdminRewards();
+  toast('Reward Approved');
+}
+function adminRejectReward(i){
+  const claims = getRewardClaims();
+  const cl = claims[i];
+  if(!cl || cl.status !== 'Pending') return;
+  cl.status = 'Rejected';
+  cl.unread = false;
+  let u = users[cl.userId] || Object.values(users).find(x => x.authUid === cl.userId || x.userId === cl.userId);
+  if(u){
+    u.notices = u.notices||[];
+    u.notices.unshift({id:Date.now(), title:'Reward Rejected', body:'আপনার রিওয়ার্ড Claim Reject হয়েছে।', time:new Date().toLocaleString()});
+    users[u.userId] = u;
+    localStorage.setItem('solix_users', JSON.stringify(users));
+  }
+  saveRewardClaims(claims);
+  renderAdminRewards();
+  toast('Reward Rejected');
+}
+
+function openSitePage(key){
+  const c = getSiteContent();
+  const titles = {about:'About Us', privacy:'Privacy Policy', terms:'Terms & Conditions', faq:'FAQ', refund:'Refund Policy', cancel:'Cancellation Policy', contact:'Contact Us'};
+  const bodies = {about:c.about, privacy:c.privacy, terms:c.terms, faq:c.faq, refund:c.refund, cancel:c.cancel, contact:c.contact};
+  const title = titles[key] || 'Info';
+  const body = bodies[key] || 'এই পেজের কন্টেন্ট এখনো সেট করা হয়নি। Admin Site Content থেকে এডিট করতে পারবেন।';
+  let modal = document.getElementById('sitePageModal');
+  if(!modal){
+    modal = document.createElement('div');
+    modal.id = 'sitePageModal';
+    modal.className = 'fixed inset-0 z-[70] hidden flex items-center justify-center p-4';
+    modal.innerHTML = '<div class="absolute inset-0 bg-black/50" onclick="this.parentElement.classList.add(\'hidden\')"></div><div class="relative bg-white rounded-3xl shadow-2xl w-full max-w-md max-h-[80vh] overflow-y-auto p-5 z-10"><h3 class="font-bold text-lg mb-3" id="sitePageTitle"></h3><div class="text-sm text-slate-700 whitespace-pre-wrap leading-relaxed" id="sitePageBody"></div><button onclick="document.getElementById(\'sitePageModal\').classList.add(\'hidden\')" class="mt-4 w-full py-2.5 rounded-xl bg-slate-100 font-semibold text-sm">Close</button></div>';
+    document.body.appendChild(modal);
+  }
+  document.getElementById('sitePageTitle').textContent = title;
+  document.getElementById('sitePageBody').textContent = body;
+  modal.classList.remove('hidden');
+}
+
+
 </script>
 
 
@@ -4743,256 +5089,6 @@ document.addEventListener('DOMContentLoaded', ()=>{ try{ applySiteContent(); }ca
   });
 
   console.log("Firebase Auth + Firestore ready");
-
-function applySiteContent(){
-  const c = getSiteContent();
-  try {
-    if(c.facebook){ document.querySelectorAll('a').forEach(a=>{ if(a.querySelector && a.querySelector('.fa-facebook-f')) a.href = c.facebook; }); }
-    if(c.telegram){ document.querySelectorAll('a').forEach(a=>{ if(a.querySelector && a.querySelector('.fa-telegram')) a.href = c.telegram; }); }
-    if(c.youtube){ document.querySelectorAll('a').forEach(a=>{ if(a.querySelector && a.querySelector('.fa-youtube')) a.href = c.youtube; }); }
-    const ticker = document.querySelector('.ticker-wrap');
-    if(ticker && (c.notice1||c.notice2||c.notice3||c.notice4)){
-      const lines = [c.notice1,c.notice2,c.notice3,c.notice4].filter(Boolean);
-      if(lines.length){
-        let html = '';
-        lines.forEach(l => html += '<span class="inline-block px-4">'+l+'</span>');
-        lines.forEach(l => html += '<span class="inline-block px-4">'+l+'</span>');
-        ticker.innerHTML = html;
-      }
-    }
-  } catch(e){}
-}
-
-function getChatStore(){
-  try { return JSON.parse(localStorage.getItem('solix_chats')||'[]'); } catch(e){ return []; }
-}
-function saveChatStore(list){
-  localStorage.setItem('solix_chats', JSON.stringify(list));
-}
-function renderAdminChat(){
-  const el = document.getElementById('adminChatList');
-  if(!el) return;
-  const list = getChatStore().slice().reverse();
-  if(!list.length){ el.innerHTML='<p class="text-slate-400 text-center py-6">No messages yet</p>'; return; }
-  el.innerHTML = list.map((m,i)=>{
-    const unread = m.unread ? '<span class="w-2 h-2 bg-red-500 rounded-full inline-block ml-1"></span>' : '';
-    return `<div class="bg-white rounded-2xl border border-slate-200 p-3 shadow-sm ${m.unread?'border-red-300':''}">
-      <div class="flex justify-between text-xs text-slate-500 mb-1">
-        <span class="font-semibold text-slate-800">${m.fromName||m.fromId||'User'} ${unread}</span>
-        <span>${m.time||''}</span>
-      </div>
-      <p class="text-sm text-slate-800">${m.text||''}</p>
-      <p class="text-[10px] text-slate-400 mt-1">To: ${m.to||'Admin'} • ID: ${m.fromId||''}</p>
-      <button onclick="adminChatMarkSeen(${list.length-1-i})" class="text-[10px] text-green-600 mt-1 font-semibold">Mark Seen</button>
-    </div>`;
-  }).join('');
-}
-function adminChatMarkSeen(idx){
-  const list = getChatStore();
-  if(list[idx]) list[idx].unread = false;
-  saveChatStore(list);
-  renderAdminChat();
-}
-function adminSendChat(){
-  const to = document.getElementById('adminChatTo')?.value?.trim();
-  const text = document.getElementById('adminChatMsg')?.value?.trim();
-  if(!to || !text) return toast('User ID ও মেসেজ দিন','err');
-  const list = getChatStore();
-  list.push({fromId:'admin', fromName:'Admin', to:to, text:text, time:new Date().toLocaleString(), unread:false, fromAdmin:true});
-  saveChatStore(list);
-  // push notice to user if exists
-  const u = Object.values(users).find(x => x.userId===to || x.authUid===to);
-  if(u){
-    u.notices = u.notices||[];
-    u.notices.unshift({id:Date.now(), title:'Support Reply', body:text, time:new Date().toLocaleString()});
-    u.chatUnread = true;
-    localStorage.setItem('solix_users', JSON.stringify(users));
-  }
-  document.getElementById('adminChatMsg').value='';
-  renderAdminChat();
-  toast('Reply sent');
-}
-
-
-function getRewardConfig(){
-  try { return JSON.parse(localStorage.getItem('solix_reward')||'null'); } catch(e){ return null; }
-}
-function getRewardClaims(){
-  try { return JSON.parse(localStorage.getItem('solix_reward_claims')||'[]'); } catch(e){ return []; }
-}
-function saveRewardClaims(list){
-  localStorage.setItem('solix_reward_claims', JSON.stringify(list));
-}
-function renderRewards(){
-  const box = document.getElementById('rewardsBox');
-  if(!box) return;
-  const r = getRewardConfig();
-  if(!r || !r.active){
-    box.innerHTML = '<div class="text-center py-8 text-slate-400 text-sm">আজকের কোনো রিওয়ার্ড টাস্ক নেই। পরে আবার চেক করুন।</div>';
-    return;
-  }
-  const uid = currentUser ? (currentUser.authUid || currentUser.userId) : '';
-  const claims = getRewardClaims();
-  const myClaim = claims.find(x => x.userId === uid && x.taskId === r.id);
-  let statusHtml = '';
-  if(myClaim){
-    if(myClaim.status === 'Pending') statusHtml = '<p class="text-amber-600 text-sm font-semibold mt-3">আপনার Claim Pending আছে। Admin Approve করলে রিওয়ার্ড পাবেন।</p>';
-    else if(myClaim.status === 'Approved') statusHtml = '<p class="text-green-600 text-sm font-semibold mt-3">✅ রিওয়ার্ড পেয়েছেন: ৳'+(myClaim.amount||0).toFixed(2)+'</p>';
-    else if(myClaim.status === 'Rejected') statusHtml = '<p class="text-red-500 text-sm font-semibold mt-3">Claim Reject হয়েছে।</p>';
-  }
-  const linkBtn = r.link ? '<a href="'+r.link+'" target="_blank" class="block w-full text-center bg-slate-900 text-white font-bold py-3 rounded-xl mb-3">কাজটি করুন (লিংক)</a>' : '';
-  const claimBtn = (!myClaim || myClaim.status === 'Rejected') ? '<button onclick="claimReward()" class="w-full bg-green-600 hover:bg-green-700 text-white font-bold py-3 rounded-xl">কাজ সম্পন্ন — Claim Reward</button>' : '';
-  box.innerHTML = `
-    <div class="text-center mb-3">
-      <div class="w-14 h-14 mx-auto rounded-2xl bg-green-50 flex items-center justify-center mb-2"><i class="fa-solid fa-gift text-2xl text-green-600"></i></div>
-      <h3 class="font-extrabold text-slate-900 text-lg">${r.title||'Reward Task'}</h3>
-      <p class="text-green-600 font-bold text-xl mt-1">৳ ${Number(r.amount||0).toFixed(2)}</p>
-    </div>
-    <div class="bg-slate-50 rounded-2xl p-4 text-sm text-slate-700 leading-relaxed whitespace-pre-wrap mb-4">${r.body||''}</div>
-    ${linkBtn}
-    ${claimBtn}
-    ${statusHtml}
-    <p class="text-[10px] text-slate-400 mt-3 text-center">Updated: ${r.updated||'—'}</p>
-  `;
-}
-function claimReward(){
-  if(!currentUser) return toast('লগইন করুন','err');
-  const r = getRewardConfig();
-  if(!r || !r.active) return toast('কোনো Active রিওয়ার্ড নেই','err');
-  const uid = currentUser.authUid || currentUser.userId;
-  const claims = getRewardClaims();
-  if(claims.some(x => x.userId === uid && x.taskId === r.id && x.status !== 'Rejected')){
-    return toast('আপনি ইতিমধ্যে Claim করেছেন','err');
-  }
-  claims.unshift({
-    id: Date.now(),
-    taskId: r.id,
-    taskTitle: r.title,
-    userId: uid,
-    userName: currentUser.name,
-    amount: Number(r.amount)||0,
-    status: 'Pending',
-    time: new Date().toLocaleString(),
-    unread: true
-  });
-  saveRewardClaims(claims);
-  currentUser.notices = currentUser.notices || [];
-  currentUser.notices.unshift({
-    id: Date.now(),
-    title: 'Reward Claim Submitted',
-    body: 'আপনার রিওয়ার্ড Claim সাবমিট হয়েছে। Admin Approve করলে ৳'+(Number(r.amount)||0).toFixed(2)+' পাবেন।',
-    time: new Date().toLocaleString()
-  });
-  save();
-  renderRewards();
-  toast('Claim সাবমিট! Admin Approve-এর অপেক্ষায়।');
-}
-function renderAdminRewards(){
-  const r = getRewardConfig() || {};
-  const set = (id,v)=>{ const e=document.getElementById(id); if(e) e.value = v||''; };
-  set('admRewardTitle', r.title);
-  set('admRewardBody', r.body);
-  set('admRewardLink', r.link);
-  set('admRewardAmount', r.amount);
-  const act = document.getElementById('admRewardActive');
-  if(act) act.checked = r.active !== false;
-
-  const el = document.getElementById('adminRewardClaims');
-  if(!el) return;
-  const claims = getRewardClaims();
-  if(!claims.length){ el.innerHTML='<p class="text-slate-400 text-center py-6 text-sm">No claims yet</p>'; return; }
-  el.innerHTML = claims.map((cl,i)=>{
-    const st = cl.status||'Pending';
-    const badge = st==='Approved'?'bg-green-100 text-green-700':st==='Rejected'?'bg-red-100 text-red-600':'bg-amber-100 text-amber-700';
-    const actions = st==='Pending' ? `
-      <button onclick="adminApproveReward(${i})" class="flex-1 bg-green-600 text-white text-xs font-bold py-2 rounded-xl">Approve</button>
-      <button onclick="adminRejectReward(${i})" class="flex-1 bg-red-500 text-white text-xs font-bold py-2 rounded-xl">Reject</button>` : '';
-    const red = cl.unread ? '<span class="w-2 h-2 bg-red-500 rounded-full inline-block"></span>' : '';
-    return `<div class="bg-white rounded-2xl border border-slate-200 p-4 shadow-sm">
-      <div class="flex justify-between mb-1">
-        <p class="font-bold text-sm text-slate-900">${cl.userName||cl.userId} ${red}</p>
-        <span class="text-[10px] font-bold px-2 py-0.5 rounded-full ${badge}">${st}</span>
-      </div>
-      <p class="text-xs text-slate-500">${cl.taskTitle||''} • ৳${(cl.amount||0).toFixed(2)}</p>
-      <p class="text-[10px] text-slate-400 mb-2">${cl.time||''}</p>
-      <div class="flex gap-2">${actions}</div>
-    </div>`;
-  }).join('');
-}
-function saveAdminReward(){
-  const title = document.getElementById('admRewardTitle')?.value?.trim();
-  const body = document.getElementById('admRewardBody')?.value?.trim();
-  const link = document.getElementById('admRewardLink')?.value?.trim();
-  const amount = parseFloat(document.getElementById('admRewardAmount')?.value)||0;
-  const active = !!document.getElementById('admRewardActive')?.checked;
-  if(!title) return toast('Title দিন','err');
-  if(amount < 1) return toast('Reward Amount কমপক্ষে ৳1','err');
-  const cfg = {
-    id: Date.now(),
-    title, body, link, amount, active,
-    updated: new Date().toLocaleString()
-  };
-  localStorage.setItem('solix_reward', JSON.stringify(cfg));
-  toast('Reward Task Saved!');
-  renderAdminRewards();
-}
-function adminApproveReward(i){
-  const claims = getRewardClaims();
-  const cl = claims[i];
-  if(!cl || cl.status !== 'Pending') return;
-  cl.status = 'Approved';
-  cl.unread = false;
-  // credit user
-  let u = users[cl.userId] || Object.values(users).find(x => x.authUid === cl.userId || x.userId === cl.userId);
-  if(u){
-    u.earned = (u.earned||0) + (cl.amount||0);
-    u.totalEarned = (u.totalEarned||0) + (cl.amount||0);
-    u.notices = u.notices||[];
-    u.notices.unshift({id:Date.now(), title:'Reward Approved!', body:'আপনি রিওয়ার্ড পেয়েছেন: ৳'+(cl.amount||0).toFixed(2), time:new Date().toLocaleString()});
-    users[u.userId] = u;
-    localStorage.setItem('solix_users', JSON.stringify(users));
-    if(window.fbSaveUser && u.authUid) window.fbSaveUser(u);
-  }
-  saveRewardClaims(claims);
-  renderAdminRewards();
-  toast('Reward Approved');
-}
-function adminRejectReward(i){
-  const claims = getRewardClaims();
-  const cl = claims[i];
-  if(!cl || cl.status !== 'Pending') return;
-  cl.status = 'Rejected';
-  cl.unread = false;
-  let u = users[cl.userId] || Object.values(users).find(x => x.authUid === cl.userId || x.userId === cl.userId);
-  if(u){
-    u.notices = u.notices||[];
-    u.notices.unshift({id:Date.now(), title:'Reward Rejected', body:'আপনার রিওয়ার্ড Claim Reject হয়েছে।', time:new Date().toLocaleString()});
-    users[u.userId] = u;
-    localStorage.setItem('solix_users', JSON.stringify(users));
-  }
-  saveRewardClaims(claims);
-  renderAdminRewards();
-  toast('Reward Rejected');
-}
-
-function openSitePage(key){
-  const c = getSiteContent();
-  const titles = {about:'About Us', privacy:'Privacy Policy', terms:'Terms & Conditions', faq:'FAQ', refund:'Refund Policy', cancel:'Cancellation Policy', contact:'Contact Us'};
-  const bodies = {about:c.about, privacy:c.privacy, terms:c.terms, faq:c.faq, refund:c.refund, cancel:c.cancel, contact:c.contact};
-  const title = titles[key] || 'Info';
-  const body = bodies[key] || 'এই পেজের কন্টেন্ট এখনো সেট করা হয়নি। Admin Site Content থেকে এডিট করতে পারবেন।';
-  let modal = document.getElementById('sitePageModal');
-  if(!modal){
-    modal = document.createElement('div');
-    modal.id = 'sitePageModal';
-    modal.className = 'fixed inset-0 z-[70] hidden flex items-center justify-center p-4';
-    modal.innerHTML = '<div class="absolute inset-0 bg-black/50" onclick="this.parentElement.classList.add(\'hidden\')"></div><div class="relative bg-white rounded-3xl shadow-2xl w-full max-w-md max-h-[80vh] overflow-y-auto p-5 z-10"><h3 class="font-bold text-lg mb-3" id="sitePageTitle"></h3><div class="text-sm text-slate-700 whitespace-pre-wrap leading-relaxed" id="sitePageBody"></div><button onclick="document.getElementById(\'sitePageModal\').classList.add(\'hidden\')" class="mt-4 w-full py-2.5 rounded-xl bg-slate-100 font-semibold text-sm">Close</button></div>';
-    document.body.appendChild(modal);
-  }
-  document.getElementById('sitePageTitle').textContent = title;
-  document.getElementById('sitePageBody').textContent = body;
-  modal.classList.remove('hidden');
-}
 
 </script>
 
