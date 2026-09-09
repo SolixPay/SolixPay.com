@@ -37,6 +37,12 @@ function sendChat(){
   if(!msg) return;
   const box = document.getElementById('chatMessages');
   box.innerHTML += `<div class="flex gap-2 justify-end"><div class="bg-green-600 text-white rounded-2xl rounded-tr-sm px-3 py-2 text-sm max-w-[80%]">${msg}</div></div>`;
+  try {
+    const list = JSON.parse(localStorage.getItem('solix_chats')||'[]');
+    list.push({fromId: (currentUser&& (currentUser.authUid||currentUser.userId))||'guest', fromName:(currentUser&&currentUser.name)||'Guest', to:'admin', text:msg, time:new Date().toLocaleString(), unread:true, fromAdmin:false});
+    localStorage.setItem('solix_chats', JSON.stringify(list));
+  } catch(e){}
+
   input.value = '';
   box.scrollTop = box.scrollHeight;
   setTimeout(()=>{
@@ -419,27 +425,27 @@ body.dark-theme .side-item:hover,body.dark-theme .side-item.active{background:#0
       <div class="border border-slate-700 rounded-xl p-4 bg-slate-900/40">
         <p class="text-xs font-bold text-green-400 uppercase tracking-wider mb-2">Company</p>
         <div class="text-sm text-slate-300 space-y-1.5 font-medium">
-          <p class="hover:text-white cursor-pointer">About Us</p>
-          <p class="hover:text-white cursor-pointer">Privacy Policy</p>
-          <p class="hover:text-white cursor-pointer">Terms &amp; Conditions</p>
+          <p class="hover:text-white cursor-pointer" onclick="openSitePage('about')">About Us</p>
+          <p class="hover:text-white cursor-pointer" onclick="openSitePage(\'privacy\')">Privacy Policy</p>
+          <p class="hover:text-white cursor-pointer" onclick="openSitePage(\'terms\')">Terms &amp; Conditions</p>
         </div>
       </div>
 
       <div class="border border-slate-700 rounded-xl p-4 bg-slate-900/40">
         <p class="text-xs font-bold text-green-400 uppercase tracking-wider mb-2">Services</p>
         <div class="text-sm text-slate-300 space-y-1.5 font-medium">
-          <p class="hover:text-white cursor-pointer">FAQ</p>
-          <p class="hover:text-white cursor-pointer">Refund Policy</p>
-          <p class="hover:text-white cursor-pointer">Cancellation Policy</p>
+          <p class="hover:text-white cursor-pointer" onclick="openSitePage(\'faq\')">FAQ</p>
+          <p class="hover:text-white cursor-pointer" onclick="openSitePage(\'refund\')">Refund Policy</p>
+          <p class="hover:text-white cursor-pointer" onclick="openSitePage(\'cancel\')">Cancellation Policy</p>
         </div>
       </div>
 
       <div class="border border-slate-700 rounded-xl p-4 bg-slate-900/40">
         <p class="text-xs font-bold text-green-400 uppercase tracking-wider mb-2">Support</p>
         <div class="text-sm text-slate-300 space-y-1.5 font-medium">
-          <p class="hover:text-white cursor-pointer">Facebook Page</p>
-          <p class="hover:text-white cursor-pointer">Official Group</p>
-          <p class="hover:text-white cursor-pointer">Contact Us</p>
+          <p class="hover:text-white cursor-pointer" onclick="openSitePage(\'contact\')">Facebook Page</p>
+          <p class="hover:text-white cursor-pointer" onclick="openSitePage(\'contact\')">Official Group</p>
+          <p class="hover:text-white cursor-pointer" onclick="openSitePage(\'contact\')">Contact Us</p>
         </div>
       </div>
 
@@ -549,25 +555,25 @@ body.dark-theme .side-item:hover,body.dark-theme .side-item.active{background:#0
         <div class="border border-slate-700 rounded-xl p-4 bg-slate-900/40">
           <p class="text-xs font-bold text-green-400 uppercase tracking-wider mb-2">Company</p>
           <div class="text-sm text-slate-300 space-y-1.5 font-medium">
-            <p class="hover:text-white cursor-pointer">About Us</p>
-            <p class="hover:text-white cursor-pointer">Privacy Policy</p>
-            <p class="hover:text-white cursor-pointer">Terms &amp; Conditions</p>
+            <p class="hover:text-white cursor-pointer" onclick="openSitePage('about')">About Us</p>
+            <p class="hover:text-white cursor-pointer" onclick="openSitePage(\'privacy\')">Privacy Policy</p>
+            <p class="hover:text-white cursor-pointer" onclick="openSitePage(\'terms\')">Terms &amp; Conditions</p>
           </div>
         </div>
         <div class="border border-slate-700 rounded-xl p-4 bg-slate-900/40">
           <p class="text-xs font-bold text-green-400 uppercase tracking-wider mb-2">Services</p>
           <div class="text-sm text-slate-300 space-y-1.5 font-medium">
-            <p class="hover:text-white cursor-pointer">FAQ</p>
-            <p class="hover:text-white cursor-pointer">Refund Policy</p>
-            <p class="hover:text-white cursor-pointer">Cancellation Policy</p>
+            <p class="hover:text-white cursor-pointer" onclick="openSitePage(\'faq\')">FAQ</p>
+            <p class="hover:text-white cursor-pointer" onclick="openSitePage(\'refund\')">Refund Policy</p>
+            <p class="hover:text-white cursor-pointer" onclick="openSitePage(\'cancel\')">Cancellation Policy</p>
           </div>
         </div>
         <div class="border border-slate-700 rounded-xl p-4 bg-slate-900/40">
           <p class="text-xs font-bold text-green-400 uppercase tracking-wider mb-2">Support</p>
           <div class="text-sm text-slate-300 space-y-1.5 font-medium">
-            <p class="hover:text-white cursor-pointer">Facebook Page</p>
-            <p class="hover:text-white cursor-pointer">Official Group</p>
-            <p class="hover:text-white cursor-pointer">Contact Us</p>
+            <p class="hover:text-white cursor-pointer" onclick="openSitePage(\'contact\')">Facebook Page</p>
+            <p class="hover:text-white cursor-pointer" onclick="openSitePage(\'contact\')">Official Group</p>
+            <p class="hover:text-white cursor-pointer" onclick="openSitePage(\'contact\')">Contact Us</p>
           </div>
         </div>
         <div>
@@ -641,25 +647,25 @@ body.dark-theme .side-item:hover,body.dark-theme .side-item.active{background:#0
         <div class="border border-slate-700 rounded-xl p-4 bg-slate-900/40">
           <p class="text-xs font-bold text-green-400 uppercase tracking-wider mb-2">Company</p>
           <div class="text-sm text-slate-300 space-y-1.5 font-medium">
-            <p class="hover:text-white cursor-pointer">About Us</p>
-            <p class="hover:text-white cursor-pointer">Privacy Policy</p>
-            <p class="hover:text-white cursor-pointer">Terms &amp; Conditions</p>
+            <p class="hover:text-white cursor-pointer" onclick="openSitePage('about')">About Us</p>
+            <p class="hover:text-white cursor-pointer" onclick="openSitePage(\'privacy\')">Privacy Policy</p>
+            <p class="hover:text-white cursor-pointer" onclick="openSitePage(\'terms\')">Terms &amp; Conditions</p>
           </div>
         </div>
         <div class="border border-slate-700 rounded-xl p-4 bg-slate-900/40">
           <p class="text-xs font-bold text-green-400 uppercase tracking-wider mb-2">Services</p>
           <div class="text-sm text-slate-300 space-y-1.5 font-medium">
-            <p class="hover:text-white cursor-pointer">FAQ</p>
-            <p class="hover:text-white cursor-pointer">Refund Policy</p>
-            <p class="hover:text-white cursor-pointer">Cancellation Policy</p>
+            <p class="hover:text-white cursor-pointer" onclick="openSitePage(\'faq\')">FAQ</p>
+            <p class="hover:text-white cursor-pointer" onclick="openSitePage(\'refund\')">Refund Policy</p>
+            <p class="hover:text-white cursor-pointer" onclick="openSitePage(\'cancel\')">Cancellation Policy</p>
           </div>
         </div>
         <div class="border border-slate-700 rounded-xl p-4 bg-slate-900/40">
           <p class="text-xs font-bold text-green-400 uppercase tracking-wider mb-2">Support</p>
           <div class="text-sm text-slate-300 space-y-1.5 font-medium">
-            <p class="hover:text-white cursor-pointer">Facebook Page</p>
-            <p class="hover:text-white cursor-pointer">Official Group</p>
-            <p class="hover:text-white cursor-pointer">Contact Us</p>
+            <p class="hover:text-white cursor-pointer" onclick="openSitePage(\'contact\')">Facebook Page</p>
+            <p class="hover:text-white cursor-pointer" onclick="openSitePage(\'contact\')">Official Group</p>
+            <p class="hover:text-white cursor-pointer" onclick="openSitePage(\'contact\')">Contact Us</p>
           </div>
         </div>
         <div>
@@ -719,25 +725,25 @@ body.dark-theme .side-item:hover,body.dark-theme .side-item.active{background:#0
         <div class="border border-slate-700 rounded-xl p-4 bg-slate-900/40">
           <p class="text-xs font-bold text-green-400 uppercase tracking-wider mb-2">Company</p>
           <div class="text-sm text-slate-300 space-y-1.5 font-medium">
-            <p class="hover:text-white cursor-pointer">About Us</p>
-            <p class="hover:text-white cursor-pointer">Privacy Policy</p>
-            <p class="hover:text-white cursor-pointer">Terms &amp; Conditions</p>
+            <p class="hover:text-white cursor-pointer" onclick="openSitePage('about')">About Us</p>
+            <p class="hover:text-white cursor-pointer" onclick="openSitePage(\'privacy\')">Privacy Policy</p>
+            <p class="hover:text-white cursor-pointer" onclick="openSitePage(\'terms\')">Terms &amp; Conditions</p>
           </div>
         </div>
         <div class="border border-slate-700 rounded-xl p-4 bg-slate-900/40">
           <p class="text-xs font-bold text-green-400 uppercase tracking-wider mb-2">Services</p>
           <div class="text-sm text-slate-300 space-y-1.5 font-medium">
-            <p class="hover:text-white cursor-pointer">FAQ</p>
-            <p class="hover:text-white cursor-pointer">Refund Policy</p>
-            <p class="hover:text-white cursor-pointer">Cancellation Policy</p>
+            <p class="hover:text-white cursor-pointer" onclick="openSitePage(\'faq\')">FAQ</p>
+            <p class="hover:text-white cursor-pointer" onclick="openSitePage(\'refund\')">Refund Policy</p>
+            <p class="hover:text-white cursor-pointer" onclick="openSitePage(\'cancel\')">Cancellation Policy</p>
           </div>
         </div>
         <div class="border border-slate-700 rounded-xl p-4 bg-slate-900/40">
           <p class="text-xs font-bold text-green-400 uppercase tracking-wider mb-2">Support</p>
           <div class="text-sm text-slate-300 space-y-1.5 font-medium">
-            <p class="hover:text-white cursor-pointer">Facebook Page</p>
-            <p class="hover:text-white cursor-pointer">Official Group</p>
-            <p class="hover:text-white cursor-pointer">Contact Us</p>
+            <p class="hover:text-white cursor-pointer" onclick="openSitePage(\'contact\')">Facebook Page</p>
+            <p class="hover:text-white cursor-pointer" onclick="openSitePage(\'contact\')">Official Group</p>
+            <p class="hover:text-white cursor-pointer" onclick="openSitePage(\'contact\')">Contact Us</p>
           </div>
         </div>
         <div>
@@ -1314,6 +1320,14 @@ body.dark-theme .side-item:hover,body.dark-theme .side-item.active{background:#0
     <div id="adsHistoryEmpty" class="bg-white rounded-2xl border border-slate-200 p-8 text-center text-slate-400 text-sm">No ads history yet</div>
   </div>
 
+  
+  <div id="view-rewards" class="hidden px-3 pb-8">
+    <h2 class="font-bold text-slate-900 mb-3 text-lg">Rewards</h2>
+    <div id="rewardsBox" class="bg-white rounded-3xl border border-slate-200 shadow-sm p-5">
+      <div class="text-center py-6 text-slate-400 text-sm">আজকের কোনো রিওয়ার্ড টাস্ক নেই</div>
+    </div>
+  </div>
+
   <div id="view-referral" class="hidden px-3">
     <h2 class="font-bold text-slate-900 mb-3 text-lg">Your Affiliate Link</h2>
     <div class="flex gap-2 mb-4">
@@ -1621,7 +1635,7 @@ body.dark-theme .side-item:hover,body.dark-theme .side-item.active{background:#0
       <span class="font-bold text-slate-900">Solix<span class="text-green-600">Pay</span></span>
     </div>
     <nav class="flex-1 overflow-y-auto py-3 px-2 space-y-1">
-      <a href="#" class="side-item"><i class="fa-solid fa-gift icon text-green-600"></i> Rewards</a>
+      <a href="#" onclick="goView('rewards')" class="side-item"><i class="fa-solid fa-gift icon text-green-600"></i> Rewards</a>
       <a href="#" id="sideVerifyNow" onclick="goView('verify')" class="side-item"><i class="fa-solid fa-id-card icon text-amber-500"></i> <span id="sideVerifyText">Verify Now</span></a>
       <a href="#" id="sideFindJobs" onclick="goView('jobs')" class="side-item active"><i class="fa-solid fa-magnifying-glass icon"></i> Find Jobs</a>
       <a href="#" onclick="goView('postjob');postJobStep(1)" class="side-item"><i class="fa-solid fa-plus icon"></i> Post New Job</a>
@@ -2101,8 +2115,7 @@ async function doLogin(){
     if(currentUser.jobsUnlocked === undefined) currentUser.jobsUnlocked = (currentUser.totalEarned||0) >= UNLOCK_EARN_NEED;
     if(!currentUser.role) currentUser.role = 'user';
 
-    // Admin primarily via role. Bootstrap only for first setup:
-    if((currentUser.email||'').toLowerCase() === 'admin@solixpay.com') currentUser.role = 'admin';
+    // Admin ONLY via role field in Firebase. No UI button, no email auto-admin.
     if(currentUser.role !== 'admin') currentUser.role = 'user';
 
 
@@ -2220,7 +2233,7 @@ function updateUI(){
   const pName=document.getElementById('pName');
   if(pName) pName.textContent=currentUser.name;
   const pUid=document.getElementById('pUid');
-  if(pUid) pUid.textContent=currentUser.userId;
+  if(pUid) pUid.textContent=currentUser.authUid || currentUser.userId || '—';
 
   const isVerified = !!currentUser.verified;
   const headerV = document.getElementById('headerVerified');
@@ -2306,7 +2319,7 @@ function goView(v){
     v = 'myjobs';
   }
 
-  ['jobs','deposit','mywork','accepted','myjobs','notify','referral','history','profile','manage','wallet','ads','adshistory','postjob','jobdetail','verify','reviews'].forEach(x=>{
+  ['jobs','deposit','mywork','accepted','myjobs','notify','referral','rewards','history','profile','manage','wallet','ads','adshistory','postjob','jobdetail','verify','reviews'].forEach(x=>{
     const el=document.getElementById('view-'+x);
     if(el)el.classList.add('hidden');
   });
@@ -2323,6 +2336,7 @@ function goView(v){
   if(v==='history')showHist('withdraw');
   if(v==='profile' || v==='manage') updateUI();
   if(v==='wallet') renderWallet();
+  if(v==='rewards') renderRewards();
   if(v==='deposit') renderDeposit();
   if(v==='adshistory') renderAdsHistory();
   if(v==='verify') renderVerifyView();
@@ -3113,7 +3127,7 @@ function renderDeposit(){
   const u=document.getElementById('depAutoUid');
   if(n) n.textContent = currentUser.name || '—';
   if(e) e.textContent = currentUser.email || '—';
-  if(u) u.textContent = currentUser.userId || '—';
+  if(u) u.textContent = currentUser.authUid || currentUser.userId || '—';
 
   // একবার unlock হলে Job Unlock অপশন আর দেখাবে না (শুধু নতুন ইউজারদের জন্য)
   const unlockOpt = document.getElementById('depUnlockOption');
@@ -3665,7 +3679,7 @@ document.addEventListener('DOMContentLoaded', async ()=>{
     currentUser = window._fbPendingUser;
     window._fbPendingUser = null;
     if(!currentUser.role) currentUser.role = 'user';
-    if((currentUser.email||'').toLowerCase() === 'admin@solixpay.com') currentUser.role = 'admin';
+    // Admin ONLY via role — no email auto promote
     if(currentUser.role !== 'admin') currentUser.role = 'user';
     users[currentUser.userId] = currentUser;
 
@@ -3708,7 +3722,7 @@ function initAdmin(){
 }
 
 function adminGo(view){
-  const views = ['overview','users','deposits','withdraws','verifications','jobs','reports','ads','notices','content','settings'];
+  const views = ['overview','users','deposits','withdraws','verifications','jobs','reports','ads','chat','rewards','notices','content','settings'];
   views.forEach(v=>{
     const el = document.getElementById('admin-'+v);
     if(el) el.classList.toggle('hidden', v !== view);
@@ -3729,6 +3743,8 @@ function adminGo(view){
   if(view==='jobs') renderAdminJobs();
   if(view==='reports') renderAdminReports();
   if(view==='ads') renderAdminAds();
+  if(view==='chat') renderAdminChat();
+  if(view==='rewards') renderAdminRewards();
   if(view==='content') loadSiteContentForm();
   if(view==='overview') loadAdminStats();
 }
@@ -3777,10 +3793,7 @@ function renderAdminUsers(){
       </div>
       <div class="flex flex-wrap gap-2">
         <button onclick="adminToggleBan('${u.userId}')" class="text-[11px] px-3 py-1.5 rounded-lg font-semibold ${u.banned?'bg-green-100 text-green-700':'bg-red-100 text-red-600'}">${u.banned?'Unban':'Ban'}</button>
-        <button onclick="adminMakeAdmin('${u.userId}')" class="text-[11px] px-3 py-1.5 rounded-lg font-semibold bg-amber-100 text-amber-700">${u.role==='admin'?'Remove Admin':'Make Admin'}</button>
         <button onclick="adminAdjustBalance('${u.userId}')" class="text-[11px] px-3 py-1.5 rounded-lg font-semibold bg-blue-100 text-blue-700">Balance</button>
-        <button onclick="adminForceUnlock('${u.userId}')" class="text-[11px] px-3 py-1.5 rounded-lg font-semibold bg-emerald-100 text-emerald-700">Unlock Jobs</button>
-        <button onclick="adminDeleteUser('${u.userId}')" class="text-[11px] px-3 py-1.5 rounded-lg font-semibold bg-slate-100 text-slate-600">Delete</button>
       </div>
     </div>`;
   }).join('');
@@ -3794,24 +3807,7 @@ function adminToggleBan(uid){
   renderAdminUsers();
   toast(u.banned ? 'User Banned' : 'User Unbanned');
 }
-function adminMakeAdmin(uid){
-  const u = users[uid]; if(!u) return;
-  u.role = u.role==='admin' ? 'user' : 'admin';
-  localStorage.setItem('solix_users', JSON.stringify(users));
-  if(window.fbSaveUser && u.authUid) window.fbSaveUser(u);
-  renderAdminUsers();
-  toast(u.role==='admin' ? 'Now Admin' : 'Admin removed');
-}
-function adminAdjustBalance(uid){
-  const u = users[uid]; if(!u) return;
-  const type = prompt('Type: earn or deposit');
-  if(!type) return;
-  const amt = parseFloat(prompt('Amount (positive or negative):'));
-  if(isNaN(amt)) return;
-  if(type.toLowerCase().includes('earn')){
-    u.earned = (u.earned||0) + amt;
-    u.totalEarned = (u.totalEarned||0) + Math.max(0,amt);
-  } else {
+ else {
     u.deposited = (u.deposited||0) + amt;
   }
   localStorage.setItem('solix_users', JSON.stringify(users));
@@ -4173,7 +4169,18 @@ function loadSiteContentForm(){
   set('scHeroTitle', c.heroTitle);
   set('scHeroSub', c.heroSub);
   set('scMilestone', c.milestone);
+  set('scNotice1', c.notice1);
+  set('scNotice2', c.notice2);
+  set('scNotice3', c.notice3);
+  set('scNotice4', c.notice4);
   set('scAddress', c.address);
+  set('scAbout', c.about);
+  set('scPrivacy', c.privacy);
+  set('scTerms', c.terms);
+  set('scFaq', c.faq);
+  set('scRefund', c.refund);
+  set('scCancel', c.cancel);
+  set('scContact', c.contact);
   set('scFacebook', c.facebook);
   set('scTelegram', c.telegram);
   set('scYoutube', c.youtube);
@@ -4184,7 +4191,18 @@ function saveSiteContent(){
     heroTitle: document.getElementById('scHeroTitle')?.value?.trim()||'',
     heroSub: document.getElementById('scHeroSub')?.value?.trim()||'',
     milestone: document.getElementById('scMilestone')?.value?.trim()||'',
+    notice1: document.getElementById('scNotice1')?.value?.trim()||'',
+    notice2: document.getElementById('scNotice2')?.value?.trim()||'',
+    notice3: document.getElementById('scNotice3')?.value?.trim()||'',
+    notice4: document.getElementById('scNotice4')?.value?.trim()||'',
     address: document.getElementById('scAddress')?.value?.trim()||'',
+    about: document.getElementById('scAbout')?.value?.trim()||'',
+    privacy: document.getElementById('scPrivacy')?.value?.trim()||'',
+    terms: document.getElementById('scTerms')?.value?.trim()||'',
+    faq: document.getElementById('scFaq')?.value?.trim()||'',
+    refund: document.getElementById('scRefund')?.value?.trim()||'',
+    cancel: document.getElementById('scCancel')?.value?.trim()||'',
+    contact: document.getElementById('scContact')?.value?.trim()||'',
     facebook: document.getElementById('scFacebook')?.value?.trim()||'',
     telegram: document.getElementById('scTelegram')?.value?.trim()||'',
     youtube: document.getElementById('scYoutube')?.value?.trim()||'',
@@ -4245,7 +4263,9 @@ document.addEventListener('DOMContentLoaded', ()=>{ try{ applySiteContent(); }ca
       <button data-admin="jobs" onclick="adminGo('jobs')" class="admin-nav-btn bg-slate-100 text-slate-700 text-xs font-semibold px-4 py-2 rounded-xl whitespace-nowrap">Jobs</button>
       <button data-admin="reports" onclick="adminGo('reports')" class="admin-nav-btn bg-slate-100 text-slate-700 text-xs font-semibold px-4 py-2 rounded-xl whitespace-nowrap">Reports</button>
       <button data-admin="ads" onclick="adminGo('ads')" class="admin-nav-btn bg-slate-100 text-slate-700 text-xs font-semibold px-4 py-2 rounded-xl whitespace-nowrap">Ads</button>
+      <button data-admin="chat" onclick="adminGo('chat')" class="admin-nav-btn bg-slate-100 text-slate-700 text-xs font-semibold px-4 py-2 rounded-xl whitespace-nowrap">Live Chat</button>
       <button data-admin="notices" onclick="adminGo('notices')" class="admin-nav-btn bg-slate-100 text-slate-700 text-xs font-semibold px-4 py-2 rounded-xl whitespace-nowrap">Notices</button>
+      <button data-admin="rewards" onclick="adminGo('rewards')" class="admin-nav-btn bg-slate-100 text-slate-700 text-xs font-semibold px-4 py-2 rounded-xl whitespace-nowrap">Rewards</button>
       <button data-admin="content" onclick="adminGo('content')" class="admin-nav-btn bg-slate-100 text-slate-700 text-xs font-semibold px-4 py-2 rounded-xl whitespace-nowrap">Site Content</button>
       <button data-admin="settings" onclick="adminGo('settings')" class="admin-nav-btn bg-slate-100 text-slate-700 text-xs font-semibold px-4 py-2 rounded-xl whitespace-nowrap">Settings</button>
 
@@ -4341,18 +4361,79 @@ document.addEventListener('DOMContentLoaded', ()=>{ try{ applySiteContent(); }ca
       <div id="adminAdsList" class="space-y-3"></div>
     </div>
 
+    
+    <div id="admin-chat" class="hidden">
+      <h2 class="font-bold text-lg text-slate-900 mb-3">Live Chat Messages</h2>
+      <p class="text-xs text-slate-500 mb-3">ইউজারদের মেসেজ এখানে আসবে। Reply দিতে পারবেন।</p>
+      <div id="adminChatList" class="space-y-3 mb-4"></div>
+      <div class="bg-white rounded-2xl border border-slate-200 p-4">
+        <label class="block text-sm font-semibold mb-1">Reply to User ID</label>
+        <input type="text" id="adminChatTo" class="input-f mb-2" placeholder="User ID / Auth UID">
+        <textarea id="adminChatMsg" class="input-f h-20 mb-2 resize-none" placeholder="আপনার রিপ্লাই..."></textarea>
+        <button onclick="adminSendChat()" class="w-full bg-green-600 text-white font-bold py-2.5 rounded-xl">Send Reply</button>
+      </div>
+    </div>
+
+    
+    <div id="admin-rewards" class="hidden">
+      <h2 class="font-bold text-lg text-slate-900 mb-3">Daily Rewards Task</h2>
+      <p class="text-xs text-slate-500 mb-3">এখানে আজকের কাজ সেট করুন। ইউজার Rewards মেনুতে গিয়ে কাজ করে Claim করবে।</p>
+      <div class="bg-white rounded-2xl border border-slate-200 p-5 shadow-sm space-y-3 mb-4">
+        <label class="block text-sm font-semibold">Task Title</label>
+        <input type="text" id="admRewardTitle" class="input-f" placeholder="যেমন: YouTube Subscribe করুন">
+        <label class="block text-sm font-semibold">Task Details / Instruction</label>
+        <textarea id="admRewardBody" class="input-f h-24 resize-none" placeholder="কী করতে হবে বিস্তারিত লিখুন..."></textarea>
+        <label class="block text-sm font-semibold">Task Link (optional)</label>
+        <input type="url" id="admRewardLink" class="input-f" placeholder="https://...">
+        <label class="block text-sm font-semibold">Reward Amount (৳)</label>
+        <input type="number" id="admRewardAmount" class="input-f" placeholder="10" min="1" step="0.5">
+        <label class="flex items-center gap-2 text-sm font-medium">
+          <input type="checkbox" id="admRewardActive" class="accent-green-600" checked> Active (ইউজারদের দেখাবে)
+        </label>
+        <button onclick="saveAdminReward()" class="w-full bg-green-600 hover:bg-green-700 text-white font-bold py-3 rounded-xl">Save Reward Task</button>
+      </div>
+      <h3 class="font-bold text-slate-900 mb-2">Claim Requests</h3>
+      <div id="adminRewardClaims" class="space-y-3"></div>
+    </div>
+
     <div id="admin-content" class="hidden">
       <h2 class="font-bold text-lg text-slate-900 mb-3">Site Content & Links</h2>
       <p class="text-xs text-slate-500 mb-3">হোম পেজ, ফুটার, সোশ্যাল লিংক এডিট করুন। সেভ করলে সাইটে দেখা যাবে।</p>
       <div class="bg-white rounded-2xl border border-slate-200 p-5 shadow-sm space-y-3">
+        <p class="text-xs font-bold text-green-700 uppercase">Home / Hero</p>
         <label class="block text-sm font-semibold">Hero Title</label>
         <input type="text" id="scHeroTitle" class="input-f" placeholder="Best Microjob & Freelancing Site...">
         <label class="block text-sm font-semibold">Hero Subtitle</label>
         <input type="text" id="scHeroSub" class="input-f" placeholder="Small Gigs. Big Results.">
         <label class="block text-sm font-semibold">Milestone Text</label>
         <input type="text" id="scMilestone" class="input-f" placeholder="1 LAKH USERS">
+        <p class="text-xs font-bold text-green-700 uppercase pt-2">Live Notice (Dashboard Ticker)</p>
+        <label class="block text-sm font-semibold">Notice Line 1</label>
+        <input type="text" id="scNotice1" class="input-f" placeholder="নতুন ইউজারদের জন্য বোনাস...">
+        <label class="block text-sm font-semibold">Notice Line 2</label>
+        <input type="text" id="scNotice2" class="input-f" placeholder="bKash/Nagad এ ২৪ ঘন্টার মধ্যে উইথড্র">
+        <label class="block text-sm font-semibold">Notice Line 3</label>
+        <input type="text" id="scNotice3" class="input-f" placeholder="টপ জব: YouTube Watch">
+        <label class="block text-sm font-semibold">Notice Line 4</label>
+        <input type="text" id="scNotice4" class="input-f" placeholder="রেফারেল করে কমিশন নিন">
+        <p class="text-xs font-bold text-green-700 uppercase pt-2">Footer / Company Pages</p>
         <label class="block text-sm font-semibold">Address</label>
         <textarea id="scAddress" class="input-f h-16 resize-none" placeholder="House 12, Road 5..."></textarea>
+        <label class="block text-sm font-semibold">About Us</label>
+        <textarea id="scAbout" class="input-f h-20 resize-none" placeholder="About Us content..."></textarea>
+        <label class="block text-sm font-semibold">Privacy Policy</label>
+        <textarea id="scPrivacy" class="input-f h-20 resize-none" placeholder="Privacy Policy..."></textarea>
+        <label class="block text-sm font-semibold">Terms & Conditions</label>
+        <textarea id="scTerms" class="input-f h-20 resize-none" placeholder="Terms..."></textarea>
+        <label class="block text-sm font-semibold">FAQ</label>
+        <textarea id="scFaq" class="input-f h-20 resize-none" placeholder="FAQ..."></textarea>
+        <label class="block text-sm font-semibold">Refund Policy</label>
+        <textarea id="scRefund" class="input-f h-16 resize-none" placeholder="Refund Policy..."></textarea>
+        <label class="block text-sm font-semibold">Cancellation Policy</label>
+        <textarea id="scCancel" class="input-f h-16 resize-none" placeholder="Cancellation Policy..."></textarea>
+        <label class="block text-sm font-semibold">Contact Us</label>
+        <textarea id="scContact" class="input-f h-16 resize-none" placeholder="Contact info..."></textarea>
+        <p class="text-xs font-bold text-green-700 uppercase pt-2">Social Links</p>
         <label class="block text-sm font-semibold">Facebook Page URL</label>
         <input type="url" id="scFacebook" class="input-f" placeholder="https://facebook.com/...">
         <label class="block text-sm font-semibold">Telegram Channel/Group URL</label>
@@ -4361,7 +4442,7 @@ document.addEventListener('DOMContentLoaded', ()=>{ try{ applySiteContent(); }ca
         <input type="url" id="scYoutube" class="input-f" placeholder="https://youtube.com/...">
         <label class="block text-sm font-semibold">Footer Copyright</label>
         <input type="text" id="scCopyright" class="input-f" placeholder="© 2026 SOLIXPAY All Rights Reserved.">
-        <button onclick="saveSiteContent()" class="w-full bg-green-600 hover:bg-green-700 text-white font-bold py-3 rounded-xl mt-2">Save Content</button>
+        <button onclick="saveSiteContent()" class="w-full bg-green-600 hover:bg-green-700 text-white font-bold py-3 rounded-xl mt-2">Save All Content</button>
       </div>
     </div>
 
@@ -4385,7 +4466,7 @@ document.addEventListener('DOMContentLoaded', ()=>{ try{ applySiteContent(); }ca
       </div>
       <div class="bg-amber-50 border border-amber-200 rounded-2xl p-4 mt-4 text-sm text-amber-900">
         <p class="font-bold mb-1">Admin Access</p>
-        <p class="text-xs leading-relaxed">Admin হওয়ার জন্য ইমেইল: <b>admin@solixpay.com</b> / <b>admin@gmail.com</b> / <b>solixadmin@gmail.com</b>। অথবা Users ট্যাব থেকে Make Admin করুন।</p>
+        <p class="text-xs leading-relaxed">Admin শুধু Firebase-এ <code>role: "admin"</code> লিখে বানানো যায়। Unlock/Delete অটো (৳৫০০ Earning বা Deposit Accept)।</p>
       </div>
     </div>
   </div>
@@ -4662,6 +4743,257 @@ document.addEventListener('DOMContentLoaded', ()=>{ try{ applySiteContent(); }ca
   });
 
   console.log("Firebase Auth + Firestore ready");
+
+function applySiteContent(){
+  const c = getSiteContent();
+  try {
+    if(c.facebook){ document.querySelectorAll('a').forEach(a=>{ if(a.querySelector && a.querySelector('.fa-facebook-f')) a.href = c.facebook; }); }
+    if(c.telegram){ document.querySelectorAll('a').forEach(a=>{ if(a.querySelector && a.querySelector('.fa-telegram')) a.href = c.telegram; }); }
+    if(c.youtube){ document.querySelectorAll('a').forEach(a=>{ if(a.querySelector && a.querySelector('.fa-youtube')) a.href = c.youtube; }); }
+    const ticker = document.querySelector('.ticker-wrap');
+    if(ticker && (c.notice1||c.notice2||c.notice3||c.notice4)){
+      const lines = [c.notice1,c.notice2,c.notice3,c.notice4].filter(Boolean);
+      if(lines.length){
+        let html = '';
+        lines.forEach(l => html += '<span class="inline-block px-4">'+l+'</span>');
+        lines.forEach(l => html += '<span class="inline-block px-4">'+l+'</span>');
+        ticker.innerHTML = html;
+      }
+    }
+  } catch(e){}
+}
+
+function getChatStore(){
+  try { return JSON.parse(localStorage.getItem('solix_chats')||'[]'); } catch(e){ return []; }
+}
+function saveChatStore(list){
+  localStorage.setItem('solix_chats', JSON.stringify(list));
+}
+function renderAdminChat(){
+  const el = document.getElementById('adminChatList');
+  if(!el) return;
+  const list = getChatStore().slice().reverse();
+  if(!list.length){ el.innerHTML='<p class="text-slate-400 text-center py-6">No messages yet</p>'; return; }
+  el.innerHTML = list.map((m,i)=>{
+    const unread = m.unread ? '<span class="w-2 h-2 bg-red-500 rounded-full inline-block ml-1"></span>' : '';
+    return `<div class="bg-white rounded-2xl border border-slate-200 p-3 shadow-sm ${m.unread?'border-red-300':''}">
+      <div class="flex justify-between text-xs text-slate-500 mb-1">
+        <span class="font-semibold text-slate-800">${m.fromName||m.fromId||'User'} ${unread}</span>
+        <span>${m.time||''}</span>
+      </div>
+      <p class="text-sm text-slate-800">${m.text||''}</p>
+      <p class="text-[10px] text-slate-400 mt-1">To: ${m.to||'Admin'} • ID: ${m.fromId||''}</p>
+      <button onclick="adminChatMarkSeen(${list.length-1-i})" class="text-[10px] text-green-600 mt-1 font-semibold">Mark Seen</button>
+    </div>`;
+  }).join('');
+}
+function adminChatMarkSeen(idx){
+  const list = getChatStore();
+  if(list[idx]) list[idx].unread = false;
+  saveChatStore(list);
+  renderAdminChat();
+}
+function adminSendChat(){
+  const to = document.getElementById('adminChatTo')?.value?.trim();
+  const text = document.getElementById('adminChatMsg')?.value?.trim();
+  if(!to || !text) return toast('User ID ও মেসেজ দিন','err');
+  const list = getChatStore();
+  list.push({fromId:'admin', fromName:'Admin', to:to, text:text, time:new Date().toLocaleString(), unread:false, fromAdmin:true});
+  saveChatStore(list);
+  // push notice to user if exists
+  const u = Object.values(users).find(x => x.userId===to || x.authUid===to);
+  if(u){
+    u.notices = u.notices||[];
+    u.notices.unshift({id:Date.now(), title:'Support Reply', body:text, time:new Date().toLocaleString()});
+    u.chatUnread = true;
+    localStorage.setItem('solix_users', JSON.stringify(users));
+  }
+  document.getElementById('adminChatMsg').value='';
+  renderAdminChat();
+  toast('Reply sent');
+}
+
+
+function getRewardConfig(){
+  try { return JSON.parse(localStorage.getItem('solix_reward')||'null'); } catch(e){ return null; }
+}
+function getRewardClaims(){
+  try { return JSON.parse(localStorage.getItem('solix_reward_claims')||'[]'); } catch(e){ return []; }
+}
+function saveRewardClaims(list){
+  localStorage.setItem('solix_reward_claims', JSON.stringify(list));
+}
+function renderRewards(){
+  const box = document.getElementById('rewardsBox');
+  if(!box) return;
+  const r = getRewardConfig();
+  if(!r || !r.active){
+    box.innerHTML = '<div class="text-center py-8 text-slate-400 text-sm">আজকের কোনো রিওয়ার্ড টাস্ক নেই। পরে আবার চেক করুন।</div>';
+    return;
+  }
+  const uid = currentUser ? (currentUser.authUid || currentUser.userId) : '';
+  const claims = getRewardClaims();
+  const myClaim = claims.find(x => x.userId === uid && x.taskId === r.id);
+  let statusHtml = '';
+  if(myClaim){
+    if(myClaim.status === 'Pending') statusHtml = '<p class="text-amber-600 text-sm font-semibold mt-3">আপনার Claim Pending আছে। Admin Approve করলে রিওয়ার্ড পাবেন।</p>';
+    else if(myClaim.status === 'Approved') statusHtml = '<p class="text-green-600 text-sm font-semibold mt-3">✅ রিওয়ার্ড পেয়েছেন: ৳'+(myClaim.amount||0).toFixed(2)+'</p>';
+    else if(myClaim.status === 'Rejected') statusHtml = '<p class="text-red-500 text-sm font-semibold mt-3">Claim Reject হয়েছে।</p>';
+  }
+  const linkBtn = r.link ? '<a href="'+r.link+'" target="_blank" class="block w-full text-center bg-slate-900 text-white font-bold py-3 rounded-xl mb-3">কাজটি করুন (লিংক)</a>' : '';
+  const claimBtn = (!myClaim || myClaim.status === 'Rejected') ? '<button onclick="claimReward()" class="w-full bg-green-600 hover:bg-green-700 text-white font-bold py-3 rounded-xl">কাজ সম্পন্ন — Claim Reward</button>' : '';
+  box.innerHTML = `
+    <div class="text-center mb-3">
+      <div class="w-14 h-14 mx-auto rounded-2xl bg-green-50 flex items-center justify-center mb-2"><i class="fa-solid fa-gift text-2xl text-green-600"></i></div>
+      <h3 class="font-extrabold text-slate-900 text-lg">${r.title||'Reward Task'}</h3>
+      <p class="text-green-600 font-bold text-xl mt-1">৳ ${Number(r.amount||0).toFixed(2)}</p>
+    </div>
+    <div class="bg-slate-50 rounded-2xl p-4 text-sm text-slate-700 leading-relaxed whitespace-pre-wrap mb-4">${r.body||''}</div>
+    ${linkBtn}
+    ${claimBtn}
+    ${statusHtml}
+    <p class="text-[10px] text-slate-400 mt-3 text-center">Updated: ${r.updated||'—'}</p>
+  `;
+}
+function claimReward(){
+  if(!currentUser) return toast('লগইন করুন','err');
+  const r = getRewardConfig();
+  if(!r || !r.active) return toast('কোনো Active রিওয়ার্ড নেই','err');
+  const uid = currentUser.authUid || currentUser.userId;
+  const claims = getRewardClaims();
+  if(claims.some(x => x.userId === uid && x.taskId === r.id && x.status !== 'Rejected')){
+    return toast('আপনি ইতিমধ্যে Claim করেছেন','err');
+  }
+  claims.unshift({
+    id: Date.now(),
+    taskId: r.id,
+    taskTitle: r.title,
+    userId: uid,
+    userName: currentUser.name,
+    amount: Number(r.amount)||0,
+    status: 'Pending',
+    time: new Date().toLocaleString(),
+    unread: true
+  });
+  saveRewardClaims(claims);
+  currentUser.notices = currentUser.notices || [];
+  currentUser.notices.unshift({
+    id: Date.now(),
+    title: 'Reward Claim Submitted',
+    body: 'আপনার রিওয়ার্ড Claim সাবমিট হয়েছে। Admin Approve করলে ৳'+(Number(r.amount)||0).toFixed(2)+' পাবেন।',
+    time: new Date().toLocaleString()
+  });
+  save();
+  renderRewards();
+  toast('Claim সাবমিট! Admin Approve-এর অপেক্ষায়।');
+}
+function renderAdminRewards(){
+  const r = getRewardConfig() || {};
+  const set = (id,v)=>{ const e=document.getElementById(id); if(e) e.value = v||''; };
+  set('admRewardTitle', r.title);
+  set('admRewardBody', r.body);
+  set('admRewardLink', r.link);
+  set('admRewardAmount', r.amount);
+  const act = document.getElementById('admRewardActive');
+  if(act) act.checked = r.active !== false;
+
+  const el = document.getElementById('adminRewardClaims');
+  if(!el) return;
+  const claims = getRewardClaims();
+  if(!claims.length){ el.innerHTML='<p class="text-slate-400 text-center py-6 text-sm">No claims yet</p>'; return; }
+  el.innerHTML = claims.map((cl,i)=>{
+    const st = cl.status||'Pending';
+    const badge = st==='Approved'?'bg-green-100 text-green-700':st==='Rejected'?'bg-red-100 text-red-600':'bg-amber-100 text-amber-700';
+    const actions = st==='Pending' ? `
+      <button onclick="adminApproveReward(${i})" class="flex-1 bg-green-600 text-white text-xs font-bold py-2 rounded-xl">Approve</button>
+      <button onclick="adminRejectReward(${i})" class="flex-1 bg-red-500 text-white text-xs font-bold py-2 rounded-xl">Reject</button>` : '';
+    const red = cl.unread ? '<span class="w-2 h-2 bg-red-500 rounded-full inline-block"></span>' : '';
+    return `<div class="bg-white rounded-2xl border border-slate-200 p-4 shadow-sm">
+      <div class="flex justify-between mb-1">
+        <p class="font-bold text-sm text-slate-900">${cl.userName||cl.userId} ${red}</p>
+        <span class="text-[10px] font-bold px-2 py-0.5 rounded-full ${badge}">${st}</span>
+      </div>
+      <p class="text-xs text-slate-500">${cl.taskTitle||''} • ৳${(cl.amount||0).toFixed(2)}</p>
+      <p class="text-[10px] text-slate-400 mb-2">${cl.time||''}</p>
+      <div class="flex gap-2">${actions}</div>
+    </div>`;
+  }).join('');
+}
+function saveAdminReward(){
+  const title = document.getElementById('admRewardTitle')?.value?.trim();
+  const body = document.getElementById('admRewardBody')?.value?.trim();
+  const link = document.getElementById('admRewardLink')?.value?.trim();
+  const amount = parseFloat(document.getElementById('admRewardAmount')?.value)||0;
+  const active = !!document.getElementById('admRewardActive')?.checked;
+  if(!title) return toast('Title দিন','err');
+  if(amount < 1) return toast('Reward Amount কমপক্ষে ৳1','err');
+  const cfg = {
+    id: Date.now(),
+    title, body, link, amount, active,
+    updated: new Date().toLocaleString()
+  };
+  localStorage.setItem('solix_reward', JSON.stringify(cfg));
+  toast('Reward Task Saved!');
+  renderAdminRewards();
+}
+function adminApproveReward(i){
+  const claims = getRewardClaims();
+  const cl = claims[i];
+  if(!cl || cl.status !== 'Pending') return;
+  cl.status = 'Approved';
+  cl.unread = false;
+  // credit user
+  let u = users[cl.userId] || Object.values(users).find(x => x.authUid === cl.userId || x.userId === cl.userId);
+  if(u){
+    u.earned = (u.earned||0) + (cl.amount||0);
+    u.totalEarned = (u.totalEarned||0) + (cl.amount||0);
+    u.notices = u.notices||[];
+    u.notices.unshift({id:Date.now(), title:'Reward Approved!', body:'আপনি রিওয়ার্ড পেয়েছেন: ৳'+(cl.amount||0).toFixed(2), time:new Date().toLocaleString()});
+    users[u.userId] = u;
+    localStorage.setItem('solix_users', JSON.stringify(users));
+    if(window.fbSaveUser && u.authUid) window.fbSaveUser(u);
+  }
+  saveRewardClaims(claims);
+  renderAdminRewards();
+  toast('Reward Approved');
+}
+function adminRejectReward(i){
+  const claims = getRewardClaims();
+  const cl = claims[i];
+  if(!cl || cl.status !== 'Pending') return;
+  cl.status = 'Rejected';
+  cl.unread = false;
+  let u = users[cl.userId] || Object.values(users).find(x => x.authUid === cl.userId || x.userId === cl.userId);
+  if(u){
+    u.notices = u.notices||[];
+    u.notices.unshift({id:Date.now(), title:'Reward Rejected', body:'আপনার রিওয়ার্ড Claim Reject হয়েছে।', time:new Date().toLocaleString()});
+    users[u.userId] = u;
+    localStorage.setItem('solix_users', JSON.stringify(users));
+  }
+  saveRewardClaims(claims);
+  renderAdminRewards();
+  toast('Reward Rejected');
+}
+
+function openSitePage(key){
+  const c = getSiteContent();
+  const titles = {about:'About Us', privacy:'Privacy Policy', terms:'Terms & Conditions', faq:'FAQ', refund:'Refund Policy', cancel:'Cancellation Policy', contact:'Contact Us'};
+  const bodies = {about:c.about, privacy:c.privacy, terms:c.terms, faq:c.faq, refund:c.refund, cancel:c.cancel, contact:c.contact};
+  const title = titles[key] || 'Info';
+  const body = bodies[key] || 'এই পেজের কন্টেন্ট এখনো সেট করা হয়নি। Admin Site Content থেকে এডিট করতে পারবেন।';
+  let modal = document.getElementById('sitePageModal');
+  if(!modal){
+    modal = document.createElement('div');
+    modal.id = 'sitePageModal';
+    modal.className = 'fixed inset-0 z-[70] hidden flex items-center justify-center p-4';
+    modal.innerHTML = '<div class="absolute inset-0 bg-black/50" onclick="this.parentElement.classList.add(\'hidden\')"></div><div class="relative bg-white rounded-3xl shadow-2xl w-full max-w-md max-h-[80vh] overflow-y-auto p-5 z-10"><h3 class="font-bold text-lg mb-3" id="sitePageTitle"></h3><div class="text-sm text-slate-700 whitespace-pre-wrap leading-relaxed" id="sitePageBody"></div><button onclick="document.getElementById(\'sitePageModal\').classList.add(\'hidden\')" class="mt-4 w-full py-2.5 rounded-xl bg-slate-100 font-semibold text-sm">Close</button></div>';
+    document.body.appendChild(modal);
+  }
+  document.getElementById('sitePageTitle').textContent = title;
+  document.getElementById('sitePageBody').textContent = body;
+  modal.classList.remove('hidden');
+}
+
 </script>
 
 
