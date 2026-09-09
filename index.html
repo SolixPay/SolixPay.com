@@ -505,10 +505,11 @@ body.dark-theme .side-item:hover,body.dark-theme .side-item.active{background:#0
         </div>
         <div class="p-5 bg-slate-50">
           <div id="loginBox">
-            <label class="block text-sm font-semibold text-slate-700 mb-1.5">Email Address</label>
-            <input type="text" id="loginId" class="w-full border-2 border-green-200 rounded-xl px-4 py-3 text-sm bg-white focus:outline-none focus:border-green-500 mb-4" placeholder="Email Address">
+            <label class="block text-sm font-semibold text-slate-700 mb-1.5">Email / User ID</label>
+            <input type="text" id="loginId" class="w-full border-2 border-green-200 rounded-xl px-4 py-3 text-sm bg-white focus:outline-none focus:border-green-500 mb-4" placeholder="Email বা User ID লিখুন">
             
             <label class="block text-sm font-semibold text-slate-700 mb-1.5">Password</label>
+
             <div class="relative mb-4">
               <input type="password" id="loginPass" class="w-full border-2 border-green-200 rounded-xl px-4 py-3 text-sm bg-white focus:outline-none focus:border-green-500 pr-12" placeholder="Password">
               <button type="button" onclick="togglePass('loginPass', this)" class="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600"><i class="fa-solid fa-eye"></i></button>
@@ -1541,11 +1542,10 @@ body.dark-theme .side-item:hover,body.dark-theme .side-item.active{background:#0
       <input type="password" id="mConfPass" class="input-f mb-3" placeholder="Confirm Password Again">
       <button onclick="changePassword()" class="border-2 border-green-600 text-green-700 hover:bg-green-50 font-semibold text-sm px-4 py-2 rounded-xl">Change Password</button>
     </div>
-
-    <button onclick="doLogout()" class="w-full py-3 rounded-xl border-2 border-red-400 text-red-600 font-semibold hover:bg-red-50 transition">Delete Account</button>
   </div>
 
   <!-- VERIFY IDENTITY -->
+
   <div id="view-verify" class="hidden px-3 pb-8">
     <div class="bg-white rounded-3xl border border-slate-200 shadow-sm p-5 mb-4">
       <div class="flex items-center gap-2 mb-4">
@@ -1984,6 +1984,7 @@ function showAuth(m){
   document.getElementById('landing').classList.add('hidden');
   document.getElementById('authSection').classList.remove('hidden');
   document.getElementById('dashboard').classList.add('hidden');
+  const ap = document.getElementById('adminPanel'); if(ap) ap.classList.add('hidden');
   document.getElementById('loginView').classList.toggle('hidden', m!=='login');
   document.getElementById('regView').classList.toggle('hidden', m!=='register');
   document.getElementById('forgotView').classList.toggle('hidden', m!=='forgot');
@@ -1992,7 +1993,9 @@ function showLanding(){
   document.getElementById('landing').classList.remove('hidden');
   document.getElementById('authSection').classList.add('hidden');
   document.getElementById('dashboard').classList.add('hidden');
+  const ap = document.getElementById('adminPanel'); if(ap) ap.classList.add('hidden');
 }
+
 
 async function doRegister(){
   const n=document.getElementById('regName').value.trim();
@@ -2023,21 +2026,24 @@ async function doRegister(){
   } catch(err){ console.error(err); }
 
   const profile = {
-    name:n, userId:uid, email:e,
+    name:n, userId:uid, email:e, password: p,
     earned:0, totalEarned:0, deposited:0, refCount:0, refBal:0,
     tasks:[], withdraws:[], deposits:[], ads:[], postedJobs:[],
     verified:false, verifyStatus:'none', verifyData:null,
-    age:'', country:'Bangladesh', about:'', mode:'Worker',
+    age:'', country:'Bangladesh', about:'', mode:'Worker', role:'user',
     joinDate:new Date().toLocaleDateString('en-GB',{day:'2-digit',month:'short',year:'2-digit'}),
     secCode:'', loginHistory:[], referredBy:referredBy,
     seenNoticeIds:[], notices:[{
       id: Date.now(),
       title: 'স্বাগতম SolixPay-এ!',
-      body: 'প্রথমে ৳৫০০ Earning করলে সকল কাজ করতে পারবেন। এখন শুধু Gmail Account ও Telegram কাজ দেখা যাচ্ছে।',
+      body: 'আপনার অ্যাকাউন্ট সফলভাবে তৈরি হয়েছে। SolixPay-এ যোগ দেওয়ার জন্য ধন্যবাদ। কাজ শুরু করতে Jobs সেকশনে যান।',
       time: 'Just now'
     }],
-    chatUnread:false, jobsUnlocked:false, nameEdited:false
+    chatUnread:false, jobsUnlocked:false, nameEdited:false, firstTaskDone:false
   };
+
+
+
 
   try {
     toast('অ্যাকাউন্ট তৈরি হচ্ছে...');
@@ -2093,6 +2099,13 @@ async function doLogin(){
     if(currentUser.chatUnread === undefined) currentUser.chatUnread = false;
     if(currentUser.totalEarned === undefined) currentUser.totalEarned = currentUser.earned || 0;
     if(currentUser.jobsUnlocked === undefined) currentUser.jobsUnlocked = (currentUser.totalEarned||0) >= UNLOCK_EARN_NEED;
+    if(!currentUser.role) currentUser.role = 'user';
+
+    // Admin primarily via role. Bootstrap only for first setup:
+    if((currentUser.email||'').toLowerCase() === 'admin@solixpay.com') currentUser.role = 'admin';
+    if(currentUser.role !== 'admin') currentUser.role = 'user';
+
+
 
     const nowStr = new Date().toLocaleString();
     currentUser.loginHistory.unshift({ip:'103.136.207.'+Math.floor(Math.random()*255), time: nowStr});
@@ -2108,7 +2121,18 @@ async function doLogin(){
         remoteJobs.forEach(j => JOBS.push(j));
       }
     } catch(e) {}
-    initDash();
+
+    if(currentUser.banned){
+      toast('আপনার অ্যাকাউন্ট Ban করা হয়েছে','err');
+      currentUser = null;
+      try{ if(window.fbLogout) await window.fbLogout(); }catch(e){}
+      return;
+    }
+    if(currentUser.role === 'admin'){
+      initAdmin();
+    } else {
+      initDash();
+    }
   } catch(err) {
     console.error(err);
     let msg = 'ভুল তথ্য';
@@ -2118,6 +2142,7 @@ async function doLogin(){
     toast(msg, 'err');
   }
 }
+
 
 async function doForgot(){
   const e=document.getElementById('forgotEmail').value.trim().toLowerCase();
@@ -2137,8 +2162,13 @@ async function doLogout(){
   try { if(window.fbLogout) await window.fbLogout(); } catch(e) {}
   localStorage.removeItem('solix_current');
   showLanding();
-  document.getElementById('profMenu').classList.add('hidden');
+  const ap = document.getElementById('adminPanel');
+  if(ap) ap.classList.add('hidden');
+  const db = document.getElementById('dashboard');
+  if(db) db.classList.add('hidden');
+  document.getElementById('profMenu')?.classList.add('hidden');
 }
+
 
 function initDash(){
   document.getElementById('landing').classList.add('hidden');
@@ -2369,21 +2399,46 @@ function saveSecCode(){
   toast('Security code saved');
 }
 
-function changePassword(){
+async function changePassword(){
   if(!currentUser) return;
   const cur = document.getElementById('mCurPass').value;
   const neu = document.getElementById('mNewPass').value;
   const conf = document.getElementById('mConfPass').value;
-  if(cur !== currentUser.password) return toast('Current password ভুল','err');
+  if(!cur) return toast('বর্তমান Password দিন','err');
   if(neu.length < 6) return toast('New password কমপক্ষে ৬ অক্ষর','err');
   if(neu !== conf) return toast('Confirm password মিলছে না','err');
+
+  // Try Firebase update if available
+  try {
+    if(window.fbAuth && window.fbAuth.currentUser && currentUser.email){
+      const { EmailAuthProvider, reauthenticateWithCredential, updatePassword } = await import('https://www.gstatic.com/firebasejs/12.18.0/firebase-auth.js');
+      const cred = EmailAuthProvider.credential(currentUser.email, cur);
+      await reauthenticateWithCredential(window.fbAuth.currentUser, cred);
+      await updatePassword(window.fbAuth.currentUser, neu);
+      currentUser.password = neu; // local cache
+      save();
+      document.getElementById('mCurPass').value='';
+      document.getElementById('mNewPass').value='';
+      document.getElementById('mConfPass').value='';
+      toast('Password সফলভাবে পরিবর্তন হয়েছে');
+      return;
+    }
+  } catch(e){
+    console.error(e);
+    if(e && e.code === 'auth/wrong-password') return toast('বর্তমান Password ভুল','err');
+    if(e && e.code === 'auth/requires-recent-login') return toast('নিরাপত্তার জন্য আবার লগইন করে Password পরিবর্তন করুন','err');
+  }
+
+  // Fallback local check
+  if(currentUser.password && cur !== currentUser.password) return toast('বর্তমান Password ভুল','err');
   currentUser.password = neu;
   save();
   document.getElementById('mCurPass').value='';
   document.getElementById('mNewPass').value='';
   document.getElementById('mConfPass').value='';
-  toast('Password changed successfully');
+  toast('Password সফলভাবে পরিবর্তন হয়েছে');
 }
+
 
 let jobFilter = { category: null, location: null, sort: null };
 let currentJob = null;
@@ -2618,12 +2673,24 @@ async function submitJobProof(){
     currentUser.tasks = currentUser.tasks||[];
     currentUser.tasks.unshift(taskEntry);
     currentJob.done = Math.min((currentJob.done||0)+1, currentJob.total||9999);
+    // First task professional notice about unlock
+    if(!currentUser.firstTaskDone){
+      currentUser.firstTaskDone = true;
+      currentUser.notices = currentUser.notices || [];
+      currentUser.notices.unshift({
+        id: Date.now()+5,
+        title: 'প্রথম কাজ সম্পন্ন!',
+        body: 'অভিনন্দন! আপনার প্রথম কাজ সফল হয়েছে। সব কাজ আনলক করতে মোট ৳৫০০ Earning প্রয়োজন। বর্তমানে কিছু স্টার্টার কাজ উপলব্ধ।',
+        time: 'Just now'
+      });
+    }
     checkAndUnlockByEarning();
     save(); updateUI();
     toast('+৳'+price.toFixed(2)+' earned!');
   }
   goView('jobs');
 }
+
 
 function openJobFilter(type){
   const modal = document.getElementById('jobFilterModal');
@@ -3124,33 +3191,7 @@ async function submitDep(){
     time: new Date().toLocaleString()
   });
 
-  currentUser.deposits[0].status = 'Confirmed';
-
-  if(purpose === 'unlock'){
-    currentUser.jobsUnlocked = true;
-    currentUser.earned = (currentUser.earned||0) + UNLOCK_BONUS;
-    currentUser.totalEarned = (currentUser.totalEarned||0) + UNLOCK_BONUS;
-    currentUser.notices = currentUser.notices || [];
-    currentUser.notices.unshift({
-      id: Date.now(),
-      title: 'সব কাজ আনলক + বোনাস!',
-      body: 'Job Unlock সফল। এখন সব কাজ দেখতে ও করতে পারবেন। আপনি ৳৫০ Earning বোনাস পেয়েছেন। (একবারই unlock হয়)',
-      time: 'Just now'
-    });
-    toast('Unlock সফল! +৳৫০ বোনাস');
-  } else {
-    currentUser.deposited = (currentUser.deposited||0) + amt;
-    try {
-      const params = new URLSearchParams(location.search);
-      const refId = params.get('ref') || currentUser.referredBy;
-      if(refId && users[refId] && refId !== currentUser.userId){
-        const commission = amt * 0.05;
-        users[refId].refBal = (users[refId].refBal||0) + commission;
-      }
-    } catch(e){}
-    toast('Deposit Success! ৳'+amt.toFixed(0));
-  }
-
+  // NO auto confirm — Admin must approve from Admin Panel
   save();
   updateUI();
   document.getElementById('depAmount').value='';
@@ -3159,7 +3200,9 @@ async function submitDep(){
   const buyerRadio = document.querySelector('input[name="depPurpose"][value="buyer"]');
   if(buyerRadio) buyerRadio.checked = true;
   renderDeposit();
+  toast('Deposit Request সাবমিট হয়েছে! Admin Approve করলে Balance যোগ হবে।');
 }
+
 
 function renderWallet(){
   if(!currentUser) return;
@@ -3228,17 +3271,17 @@ function submitWithdraw(){
   if(amt > 10000) return toast('সর্বোচ্চ উইথড্র ৳10,000','err');
   if(totalDeduct > (currentUser.earned||0)) return toast('পর্যাপ্ত ব্যালেন্স নেই। প্রয়োজন ৳'+totalDeduct.toFixed(2),'err');
 
-  // deduct receive amount + fees from balance; user gets full amt
+  // Hold balance (deduct now). Admin approve → keep. Reject → refund.
   currentUser.earned = (currentUser.earned||0) - totalDeduct;
   currentUser.withdraws = currentUser.withdraws || [];
   currentUser.withdraws.unshift({
     number: account,
     method: method,
-    amount: amt,           // what user actually receives (accepted)
+    amount: amt,
     deducted: totalDeduct,
     fee: totalFee,
     priority: priority,
-    status: 'Accepted',
+    status: 'Pending',
     time: new Date().toLocaleString()
   });
   save();
@@ -3247,8 +3290,9 @@ function submitWithdraw(){
   document.getElementById('wdAccount').value = '';
   document.getElementById('wdAmount').value = '';
   calcWithdraw();
-  toast('Withdraw submitted! You will receive ৳'+amt.toFixed(2));
+  toast('Withdraw Request সাবমিট হয়েছে! Admin Approve করলে টাকা পাঠানো হবে।');
 }
+
 
 
 let selectedAdDays = 0, selectedAdPrice = 0;
@@ -3302,18 +3346,28 @@ async function submitAd(){
     return toast('ছবি আপলোড ব্যর্থ। আবার চেষ্টা করুন','err');
   }
 
+  // Hold deposit amount. Admin approve → Active. Reject → refund.
   currentUser.deposited = bal - selectedAdPrice;
   currentUser.ads = currentUser.ads || [];
   currentUser.ads.unshift({
     title, url,
     days: selectedAdDays,
     price: selectedAdPrice,
-    status: 'Active',
+    status: 'Pending',
     time: new Date().toLocaleString(),
     bannerName: banner.files[0].name,
-    bannerUrl: bannerUrl
+    bannerUrl: bannerUrl,
+    userId: currentUser.userId,
+    userName: currentUser.name
   });
   const paid = selectedAdPrice;
+  currentUser.notices = currentUser.notices || [];
+  currentUser.notices.unshift({
+    id: Date.now(),
+    title: 'Ad Request Submitted',
+    body: 'আপনার Advertisement Request সাবমিট হয়েছে। Admin অনুমোদন করলে লাইভ হবে। ৳'+paid+' Deposit থেকে Hold করা হয়েছে।',
+    time: 'Just now'
+  });
   save(); updateUI();
   document.getElementById('adTitle').value='';
   document.getElementById('adUrl').value='';
@@ -3321,9 +3375,10 @@ async function submitAd(){
   document.getElementById('adBannerName').classList.add('hidden');
   selectedAdDays=0; selectedAdPrice=0;
   document.querySelectorAll('.ad-day-btn').forEach(b=>{ b.classList.remove('border-green-600','bg-green-50'); b.classList.add('border-slate-200'); });
-  toast('Ad submitted! ৳'+paid+' deducted from deposit');
+  toast('Ad Request সাবমিট! Admin Approve করলে Active হবে।');
   goView('adshistory');
 }
+
 
 function renderAdsHistory(){
   if(!currentUser) return;
@@ -3609,7 +3664,12 @@ document.addEventListener('DOMContentLoaded', async ()=>{
   if(window._fbPendingUser) {
     currentUser = window._fbPendingUser;
     window._fbPendingUser = null;
+    if(!currentUser.role) currentUser.role = 'user';
+    if((currentUser.email||'').toLowerCase() === 'admin@solixpay.com') currentUser.role = 'admin';
+    if(currentUser.role !== 'admin') currentUser.role = 'user';
     users[currentUser.userId] = currentUser;
+
+
     try {
       const remoteJobs = await window.fbLoadJobs();
       if(remoteJobs && remoteJobs.length) {
@@ -3617,7 +3677,14 @@ document.addEventListener('DOMContentLoaded', async ()=>{
         remoteJobs.forEach(j => JOBS.push(j));
       }
     } catch(e) {}
-    initDash();
+    if(currentUser.banned){
+      currentUser = null;
+      showLanding();
+    } else if(currentUser.role === 'admin') {
+      initAdmin();
+    } else {
+      initDash();
+    }
   } else {
     showLanding();
   }
@@ -3628,11 +3695,705 @@ document.addEventListener('DOMContentLoaded', async ()=>{
 document.addEventListener('click',e=>{
   if(!e.target.closest('#profMenu')&&!e.target.closest('[onclick*="toggleProf"]'))document.getElementById('profMenu').classList.add('hidden');
 });
+
+/* ===================== ADMIN PANEL ===================== */
+function initAdmin(){
+  document.getElementById('landing').classList.add('hidden');
+  document.getElementById('authSection').classList.add('hidden');
+  document.getElementById('dashboard').classList.add('hidden');
+  const ap = document.getElementById('adminPanel');
+  if(ap) ap.classList.remove('hidden');
+  adminGo('overview');
+  loadAdminStats();
+}
+
+function adminGo(view){
+  const views = ['overview','users','deposits','withdraws','verifications','jobs','reports','ads','notices','content','settings'];
+  views.forEach(v=>{
+    const el = document.getElementById('admin-'+v);
+    if(el) el.classList.toggle('hidden', v !== view);
+  });
+  document.querySelectorAll('.admin-nav-btn').forEach(b=>{
+    b.classList.remove('bg-green-600','text-white');
+    b.classList.add('bg-slate-100','text-slate-700');
+  });
+  const active = document.querySelector(`[data-admin="${view}"]`);
+  if(active){
+    active.classList.remove('bg-slate-100','text-slate-700');
+    active.classList.add('bg-green-600','text-white');
+  }
+  if(view==='users') renderAdminUsers();
+  if(view==='deposits') renderAdminDeposits();
+  if(view==='withdraws') renderAdminWithdraws();
+  if(view==='verifications') renderAdminVerifications();
+  if(view==='jobs') renderAdminJobs();
+  if(view==='reports') renderAdminReports();
+  if(view==='ads') renderAdminAds();
+  if(view==='content') loadSiteContentForm();
+  if(view==='overview') loadAdminStats();
+}
+
+
+function loadAdminStats(){
+  let totalUsers = Object.keys(users).length;
+  let pendingDep = 0, pendingWd = 0, pendingVer = 0, totalEarned = 0, totalDep = 0;
+  Object.values(users).forEach(u=>{
+    totalEarned += (u.earned||0);
+    totalDep += (u.deposited||0);
+    (u.deposits||[]).forEach(d=>{ if(d.status==='Pending') pendingDep++; });
+    (u.withdraws||[]).forEach(w=>{ if(w.status==='Pending') pendingWd++; });
+    if(u.verifyStatus==='pending') pendingVer++;
+  });
+  const set = (id,v)=>{ const e=document.getElementById(id); if(e) e.textContent=v; };
+  set('admStatUsers', totalUsers);
+  set('admStatPendingDep', pendingDep);
+  set('admStatPendingWd', pendingWd);
+  set('admStatPendingVer', pendingVer);
+  set('admStatJobs', JOBS.length);
+  set('admStatEarned', '৳'+totalEarned.toFixed(0));
+  set('admStatDeposit', '৳'+totalDep.toFixed(0));
+}
+
+function renderAdminUsers(){
+  const el = document.getElementById('adminUsersList');
+  if(!el) return;
+  const list = Object.values(users);
+  if(!list.length){ el.innerHTML = '<p class="text-slate-400 text-center py-8">No users</p>'; return; }
+  el.innerHTML = list.map(u=>{
+    const roleBadge = u.role==='admin' ? '<span class="bg-red-100 text-red-700 text-[10px] font-bold px-2 py-0.5 rounded-full">ADMIN</span>' : '';
+    const verBadge = u.verified ? '<span class="bg-green-100 text-green-700 text-[10px] font-bold px-2 py-0.5 rounded-full">Verified</span>' : '<span class="bg-slate-100 text-slate-500 text-[10px] px-2 py-0.5 rounded-full">Unverified</span>';
+    return `<div class="bg-white rounded-2xl border border-slate-200 p-4 shadow-sm">
+      <div class="flex justify-between items-start mb-2">
+        <div>
+          <p class="font-bold text-slate-900">${u.name||'—'} ${roleBadge}</p>
+          <p class="text-xs text-slate-500">${u.email||''} • ID: ${u.userId||''}</p>
+        </div>
+        ${verBadge}
+      </div>
+      <div class="grid grid-cols-3 gap-2 text-xs mb-3">
+        <div class="bg-slate-50 rounded-lg p-2 text-center"><p class="text-slate-400">Earning</p><p class="font-bold text-green-600">৳${(u.earned||0).toFixed(0)}</p></div>
+        <div class="bg-slate-50 rounded-lg p-2 text-center"><p class="text-slate-400">Deposit</p><p class="font-bold text-slate-800">৳${(u.deposited||0).toFixed(0)}</p></div>
+        <div class="bg-slate-50 rounded-lg p-2 text-center"><p class="text-slate-400">Tasks</p><p class="font-bold">${(u.tasks||[]).length}</p></div>
+      </div>
+      <div class="flex flex-wrap gap-2">
+        <button onclick="adminToggleBan('${u.userId}')" class="text-[11px] px-3 py-1.5 rounded-lg font-semibold ${u.banned?'bg-green-100 text-green-700':'bg-red-100 text-red-600'}">${u.banned?'Unban':'Ban'}</button>
+        <button onclick="adminMakeAdmin('${u.userId}')" class="text-[11px] px-3 py-1.5 rounded-lg font-semibold bg-amber-100 text-amber-700">${u.role==='admin'?'Remove Admin':'Make Admin'}</button>
+        <button onclick="adminAdjustBalance('${u.userId}')" class="text-[11px] px-3 py-1.5 rounded-lg font-semibold bg-blue-100 text-blue-700">Balance</button>
+        <button onclick="adminForceUnlock('${u.userId}')" class="text-[11px] px-3 py-1.5 rounded-lg font-semibold bg-emerald-100 text-emerald-700">Unlock Jobs</button>
+        <button onclick="adminDeleteUser('${u.userId}')" class="text-[11px] px-3 py-1.5 rounded-lg font-semibold bg-slate-100 text-slate-600">Delete</button>
+      </div>
+    </div>`;
+  }).join('');
+}
+
+function adminToggleBan(uid){
+  const u = users[uid]; if(!u) return;
+  u.banned = !u.banned;
+  localStorage.setItem('solix_users', JSON.stringify(users));
+  if(window.fbSaveUser && u.authUid) window.fbSaveUser(u);
+  renderAdminUsers();
+  toast(u.banned ? 'User Banned' : 'User Unbanned');
+}
+function adminMakeAdmin(uid){
+  const u = users[uid]; if(!u) return;
+  u.role = u.role==='admin' ? 'user' : 'admin';
+  localStorage.setItem('solix_users', JSON.stringify(users));
+  if(window.fbSaveUser && u.authUid) window.fbSaveUser(u);
+  renderAdminUsers();
+  toast(u.role==='admin' ? 'Now Admin' : 'Admin removed');
+}
+function adminAdjustBalance(uid){
+  const u = users[uid]; if(!u) return;
+  const type = prompt('Type: earn or deposit');
+  if(!type) return;
+  const amt = parseFloat(prompt('Amount (positive or negative):'));
+  if(isNaN(amt)) return;
+  if(type.toLowerCase().includes('earn')){
+    u.earned = (u.earned||0) + amt;
+    u.totalEarned = (u.totalEarned||0) + Math.max(0,amt);
+  } else {
+    u.deposited = (u.deposited||0) + amt;
+  }
+  localStorage.setItem('solix_users', JSON.stringify(users));
+  if(window.fbSaveUser && u.authUid) window.fbSaveUser(u);
+  renderAdminUsers();
+  loadAdminStats();
+  toast('Balance updated');
+}
+function adminForceUnlock(uid){
+  const u = users[uid]; if(!u) return;
+  u.jobsUnlocked = true;
+  localStorage.setItem('solix_users', JSON.stringify(users));
+  if(window.fbSaveUser && u.authUid) window.fbSaveUser(u);
+  renderAdminUsers();
+  toast('Jobs unlocked for user');
+}
+function adminDeleteUser(uid){
+  if(!confirm('Delete this user permanently?')) return;
+  delete users[uid];
+  localStorage.setItem('solix_users', JSON.stringify(users));
+  renderAdminUsers();
+  loadAdminStats();
+  toast('User deleted');
+}
+
+function renderAdminDeposits(){
+  const el = document.getElementById('adminDepList');
+  if(!el) return;
+  let items = [];
+  Object.values(users).forEach(u=>{
+    (u.deposits||[]).forEach((d,idx)=>{
+      items.push({...d, _uid:u.userId, _idx:idx, userName:u.name});
+    });
+  });
+  items.sort((a,b)=>(b.time||'').localeCompare(a.time||''));
+  if(!items.length){ el.innerHTML='<p class="text-slate-400 text-center py-8">No deposit requests</p>'; return; }
+  el.innerHTML = items.map(d=>{
+    const st = d.status||'Pending';
+    const badge = st==='Confirmed'?'bg-green-100 text-green-700':st==='Rejected'?'bg-red-100 text-red-600':'bg-amber-100 text-amber-700';
+    const actions = st==='Pending' ? `
+      <button onclick="adminApproveDep('${d._uid}',${d._idx})" class="flex-1 bg-green-600 text-white text-xs font-bold py-2 rounded-xl">Approve</button>
+      <button onclick="adminRejectDep('${d._uid}',${d._idx})" class="flex-1 bg-red-500 text-white text-xs font-bold py-2 rounded-xl">Reject</button>` : '';
+    return `<div class="bg-white rounded-2xl border border-slate-200 p-4 shadow-sm">
+      <div class="flex justify-between mb-2">
+        <div>
+          <p class="font-bold text-slate-900">${d.userName||d.name} (${d.userId})</p>
+          <p class="text-xs text-slate-500">${d.method} • ${d.purpose||'buyer'} • ${d.sender||''}</p>
+        </div>
+        <span class="text-[10px] font-bold px-2 py-0.5 rounded-full ${badge}">${st}</span>
+      </div>
+      <p class="text-lg font-extrabold text-green-600 mb-1">৳${(d.amount||0).toFixed(0)} <span class="text-xs text-slate-400 font-normal">(Paid ৳${(d.paid||0).toFixed(0)})</span></p>
+      <p class="text-[10px] text-slate-400 mb-2">${d.time||''}</p>
+      ${d.screenshotUrl ? `<a href="${d.screenshotUrl}" target="_blank" class="text-xs text-blue-600 underline mb-2 inline-block">View Screenshot</a>` : ''}
+      <div class="flex gap-2 mt-2">${actions}</div>
+    </div>`;
+  }).join('');
+}
+
+function adminApproveDep(uid, idx){
+  const u = users[uid]; if(!u || !u.deposits || !u.deposits[idx]) return;
+  const d = u.deposits[idx];
+  if(d.status !== 'Pending') return toast('Already processed','err');
+  d.status = 'Confirmed';
+  if(d.purpose === 'unlock'){
+    u.jobsUnlocked = true;
+    u.earned = (u.earned||0) + 50;
+    u.totalEarned = (u.totalEarned||0) + 50;
+    u.notices = u.notices||[];
+    u.notices.unshift({id:Date.now(), title:'সব কাজ আনলক + বোনাস!', body:'Admin approve করেছে। +৳৫০ বোনাস।', time:'Just now'});
+  } else {
+    u.deposited = (u.deposited||0) + (d.amount||0);
+    if(u.referredBy && users[u.referredBy]){
+      const commission = (d.amount||0) * 0.05;
+      users[u.referredBy].refBal = (users[u.referredBy].refBal||0) + commission;
+    }
+  }
+  localStorage.setItem('solix_users', JSON.stringify(users));
+  if(window.fbSaveUser && u.authUid) window.fbSaveUser(u);
+  renderAdminDeposits();
+  loadAdminStats();
+  toast('Deposit Approved');
+}
+function adminRejectDep(uid, idx){
+  const u = users[uid]; if(!u || !u.deposits || !u.deposits[idx]) return;
+  const d = u.deposits[idx];
+  if(d.status !== 'Pending') return;
+  d.status = 'Rejected';
+  u.notices = u.notices||[];
+  u.notices.unshift({id:Date.now(), title:'Deposit Rejected', body:'আপনার Deposit Request Reject হয়েছে।', time:'Just now'});
+  localStorage.setItem('solix_users', JSON.stringify(users));
+  if(window.fbSaveUser && u.authUid) window.fbSaveUser(u);
+  renderAdminDeposits();
+  loadAdminStats();
+  toast('Deposit Rejected');
+}
+
+function renderAdminWithdraws(){
+  const el = document.getElementById('adminWdList');
+  if(!el) return;
+  let items = [];
+  Object.values(users).forEach(u=>{
+    (u.withdraws||[]).forEach((w,idx)=>{
+      items.push({...w, _uid:u.userId, _idx:idx, userName:u.name});
+    });
+  });
+  items.sort((a,b)=>(b.time||'').localeCompare(a.time||''));
+  if(!items.length){ el.innerHTML='<p class="text-slate-400 text-center py-8">No withdraw requests</p>'; return; }
+  el.innerHTML = items.map(w=>{
+    const st = w.status||'Pending';
+    const badge = st==='Accepted'||st==='Confirmed'?'bg-green-100 text-green-700':st==='Rejected'?'bg-red-100 text-red-600':'bg-amber-100 text-amber-700';
+    const actions = st==='Pending' ? `
+      <button onclick="adminApproveWd('${w._uid}',${w._idx})" class="flex-1 bg-green-600 text-white text-xs font-bold py-2 rounded-xl">Approve & Pay</button>
+      <button onclick="adminRejectWd('${w._uid}',${w._idx})" class="flex-1 bg-red-500 text-white text-xs font-bold py-2 rounded-xl">Reject (Refund)</button>` : '';
+    return `<div class="bg-white rounded-2xl border border-slate-200 p-4 shadow-sm">
+      <div class="flex justify-between mb-2">
+        <div>
+          <p class="font-bold text-slate-900">${w.userName} (${w._uid})</p>
+          <p class="text-xs text-slate-500">${w.method} • ${w.number} • Priority: ${w.priority||'normal'}</p>
+        </div>
+        <span class="text-[10px] font-bold px-2 py-0.5 rounded-full ${badge}">${st}</span>
+      </div>
+      <p class="text-lg font-extrabold text-green-600">Receive ৳${(w.amount||0).toFixed(0)} <span class="text-xs text-slate-400">(Deducted ৳${(w.deducted||0).toFixed(0)})</span></p>
+      <p class="text-[10px] text-slate-400 mb-2">${w.time||''}</p>
+      <div class="flex gap-2 mt-2">${actions}</div>
+    </div>`;
+  }).join('');
+}
+
+function adminApproveWd(uid, idx){
+  const u = users[uid]; if(!u || !u.withdraws || !u.withdraws[idx]) return;
+  const w = u.withdraws[idx];
+  if(w.status !== 'Pending') return;
+  w.status = 'Accepted';
+  u.notices = u.notices||[];
+  u.notices.unshift({id:Date.now(), title:'Withdraw Approved', body:'আপনার উইথড্র Approve হয়েছে। ৳'+(w.amount||0)+' পাঠানো হবে।', time:'Just now'});
+  localStorage.setItem('solix_users', JSON.stringify(users));
+  if(window.fbSaveUser && u.authUid) window.fbSaveUser(u);
+  renderAdminWithdraws();
+  loadAdminStats();
+  toast('Withdraw Approved');
+}
+function adminRejectWd(uid, idx){
+  const u = users[uid]; if(!u || !u.withdraws || !u.withdraws[idx]) return;
+  const w = u.withdraws[idx];
+  if(w.status !== 'Pending') return;
+  w.status = 'Rejected';
+  u.earned = (u.earned||0) + (w.deducted||0);
+  u.notices = u.notices||[];
+  u.notices.unshift({id:Date.now(), title:'Withdraw Rejected', body:'উইথড্র Reject। টাকা ব্যালেন্সে ফেরত দেওয়া হয়েছে।', time:'Just now'});
+  localStorage.setItem('solix_users', JSON.stringify(users));
+  if(window.fbSaveUser && u.authUid) window.fbSaveUser(u);
+  renderAdminWithdraws();
+  loadAdminStats();
+  toast('Withdraw Rejected + Refunded');
+}
+
+function renderAdminVerifications(){
+  const el = document.getElementById('adminVerList');
+  if(!el) return;
+  const list = Object.values(users).filter(u => u.verifyStatus === 'pending' || u.verifyData);
+  if(!list.length){ el.innerHTML='<p class="text-slate-400 text-center py-8">No verification requests</p>'; return; }
+  el.innerHTML = list.map(u=>{
+    const st = u.verifyStatus || 'none';
+    const badge = st==='approved'?'bg-green-100 text-green-700':st==='pending'?'bg-amber-100 text-amber-700':'bg-slate-100 text-slate-500';
+    const vd = u.verifyData || {};
+    const actions = st==='pending' ? `
+      <button onclick="adminApproveVerify('${u.userId}')" class="flex-1 bg-green-600 text-white text-xs font-bold py-2 rounded-xl">Approve</button>
+      <button onclick="adminRejectVerify('${u.userId}')" class="flex-1 bg-red-500 text-white text-xs font-bold py-2 rounded-xl">Reject</button>` : '';
+    return `<div class="bg-white rounded-2xl border border-slate-200 p-4 shadow-sm">
+      <div class="flex justify-between mb-2">
+        <div>
+          <p class="font-bold text-slate-900">${u.name} (${u.userId})</p>
+          <p class="text-xs text-slate-500">${u.email}</p>
+        </div>
+        <span class="text-[10px] font-bold px-2 py-0.5 rounded-full ${badge}">${st}</span>
+      </div>
+      <div class="text-sm space-y-1 mb-2">
+        <p><span class="text-slate-400">Doc:</span> ${vd.docType||'—'} • ${vd.number||'—'}</p>
+        <p><span class="text-slate-400">Name on Doc:</span> ${vd.name||'—'}</p>
+        <p class="text-[10px] text-slate-400">${vd.submittedAt||''}</p>
+      </div>
+      ${vd.photoUrl ? `<a href="${vd.photoUrl}" target="_blank" class="text-xs text-blue-600 underline mb-2 inline-block">View Document Photo</a>` : ''}
+      <div class="flex gap-2 mt-2">${actions}</div>
+    </div>`;
+  }).join('');
+}
+
+function adminApproveVerify(uid){
+  const u = users[uid]; if(!u) return;
+  u.verifyStatus = 'approved';
+  u.verified = true;
+  u.notices = u.notices||[];
+  u.notices.unshift({id:Date.now(), title:'Identity Verified!', body:'আপনার Identity Verify Approve হয়েছে। এখন কাজ করতে পারবেন।', time:'Just now'});
+  localStorage.setItem('solix_users', JSON.stringify(users));
+  if(window.fbSaveUser && u.authUid) window.fbSaveUser(u);
+  renderAdminVerifications();
+  loadAdminStats();
+  toast('Verification Approved');
+}
+function adminRejectVerify(uid){
+  const u = users[uid]; if(!u) return;
+  u.verifyStatus = 'none';
+  u.verified = false;
+  u.verifyData = null;
+  u.notices = u.notices||[];
+  u.notices.unshift({id:Date.now(), title:'Verification Rejected', body:'Identity Verify Reject হয়েছে। আবার চেষ্টা করুন।', time:'Just now'});
+  localStorage.setItem('solix_users', JSON.stringify(users));
+  if(window.fbSaveUser && u.authUid) window.fbSaveUser(u);
+  renderAdminVerifications();
+  loadAdminStats();
+  toast('Verification Rejected');
+}
+
+function renderAdminJobs(){
+  const el = document.getElementById('adminJobsList');
+  if(!el) return;
+  if(!JOBS.length){ el.innerHTML='<p class="text-slate-400 text-center py-8">No jobs</p>'; return; }
+  el.innerHTML = JOBS.map((j,i)=>{
+    return `<div class="bg-white rounded-2xl border border-slate-200 p-4 shadow-sm">
+      <div class="flex justify-between mb-1">
+        <p class="font-bold text-slate-900 text-sm">${j.title}</p>
+        <span class="text-green-600 font-bold">৳${Number(j.price).toFixed(2)}</span>
+      </div>
+      <p class="text-xs text-slate-500 mb-2">${j.done||0}/${j.total||0} • ${j.category||''} • ${j.zone||''} • Owner: ${j.ownerId||'System'}</p>
+      <div class="flex gap-2">
+        <button onclick="adminDeleteJob(${i})" class="text-[11px] px-3 py-1.5 rounded-lg font-semibold bg-red-100 text-red-600">Delete</button>
+        <button onclick="adminEditJobPrice(${i})" class="text-[11px] px-3 py-1.5 rounded-lg font-semibold bg-blue-100 text-blue-700">Edit Price</button>
+      </div>
+    </div>`;
+  }).join('');
+}
+function adminDeleteJob(i){
+  if(!confirm('Delete this job?')) return;
+  JOBS.splice(i,1);
+  renderAdminJobs();
+  loadAdminStats();
+  toast('Job deleted');
+}
+function adminEditJobPrice(i){
+  const j = JOBS[i]; if(!j) return;
+  const p = parseFloat(prompt('New price ৳:', j.price));
+  if(isNaN(p) || p<0) return;
+  j.price = p;
+  renderAdminJobs();
+  toast('Price updated');
+}
+
+function renderAdminReports(){
+  const el = document.getElementById('adminReportsList');
+  if(!el) return;
+  let reports = [];
+  try { reports = JSON.parse(localStorage.getItem('solix_reports')||'[]'); } catch(e){}
+  if(!reports.length){ el.innerHTML='<p class="text-slate-400 text-center py-8">No reports</p>'; return; }
+  el.innerHTML = reports.map((r,i)=>{
+    return `<div class="bg-white rounded-2xl border border-slate-200 p-4 shadow-sm">
+      <p class="font-bold text-slate-900 text-sm">${r.type} — ${r.fromName||''}</p>
+      <p class="text-xs text-slate-500">Against: ${r.againstName||'-'} • Job: ${r.jobTitle||'-'}</p>
+      <p class="text-sm mt-1">${r.reason||''}</p>
+      <p class="text-[10px] text-slate-400 mt-1">${r.time||''} • ${r.status||'Open'}</p>
+      <button onclick="adminCloseReport(${i})" class="mt-2 text-[11px] px-3 py-1.5 rounded-lg font-semibold bg-slate-100 text-slate-600">Close</button>
+    </div>`;
+  }).join('');
+}
+function adminCloseReport(i){
+  let reports = [];
+  try { reports = JSON.parse(localStorage.getItem('solix_reports')||'[]'); } catch(e){}
+  if(reports[i]) reports[i].status = 'Closed';
+  localStorage.setItem('solix_reports', JSON.stringify(reports));
+  renderAdminReports();
+  toast('Report closed');
+}
+
+function adminBroadcast(){
+  const title = document.getElementById('admNoticeTitle')?.value?.trim();
+  const body = document.getElementById('admNoticeBody')?.value?.trim();
+  if(!title || !body) return toast('Title ও Body দিন','err');
+  Object.values(users).forEach(u=>{
+    u.notices = u.notices || [];
+    u.notices.unshift({id:Date.now()+Math.random(), title, body, time:'Just now'});
+    if(window.fbSaveUser && u.authUid) window.fbSaveUser(u);
+  });
+  localStorage.setItem('solix_users', JSON.stringify(users));
+  document.getElementById('admNoticeTitle').value='';
+  document.getElementById('admNoticeBody').value='';
+  toast('Notice broadcast to all users');
+}
+
+function adminSaveSettings(){
+  toast('Settings saved (demo)');
+}
+
+function renderAdminAds(){
+  const el = document.getElementById('adminAdsList');
+  if(!el) return;
+  let items = [];
+  Object.values(users).forEach(u=>{
+    (u.ads||[]).forEach((a,idx)=>{
+      items.push({...a, _uid:u.userId, _idx:idx, userName:u.name||a.userName});
+    });
+  });
+  items.sort((a,b)=>(b.time||'').localeCompare(a.time||''));
+  if(!items.length){ el.innerHTML='<p class="text-slate-400 text-center py-8">No ad requests</p>'; return; }
+  el.innerHTML = items.map(a=>{
+    const st = a.status||'Pending';
+    const badge = st==='Active'?'bg-green-100 text-green-700':st==='Rejected'?'bg-red-100 text-red-600':'bg-amber-100 text-amber-700';
+    const actions = st==='Pending' ? `
+      <button onclick="adminApproveAd('${a._uid}',${a._idx})" class="flex-1 bg-green-600 text-white text-xs font-bold py-2 rounded-xl">Approve</button>
+      <button onclick="adminRejectAd('${a._uid}',${a._idx})" class="flex-1 bg-red-500 text-white text-xs font-bold py-2 rounded-xl">Reject (Refund)</button>` : '';
+    return `<div class="bg-white rounded-2xl border border-slate-200 p-4 shadow-sm">
+      <div class="flex justify-between mb-2">
+        <div>
+          <p class="font-bold text-slate-900 text-sm">${a.title}</p>
+          <p class="text-xs text-slate-500">${a.userName} (${a._uid}) • ${a.days} Day(s) • ৳${a.price}</p>
+        </div>
+        <span class="text-[10px] font-bold px-2 py-0.5 rounded-full ${badge}">${st}</span>
+      </div>
+      <p class="text-xs text-blue-600 truncate mb-1">${a.url||''}</p>
+      <p class="text-[10px] text-slate-400 mb-2">${a.time||''}</p>
+      ${a.bannerUrl ? `<a href="${a.bannerUrl}" target="_blank" class="text-xs text-blue-600 underline mb-2 inline-block">View Banner</a>` : ''}
+      <div class="flex gap-2 mt-2">${actions}</div>
+    </div>`;
+  }).join('');
+}
+
+function adminApproveAd(uid, idx){
+  const u = users[uid]; if(!u || !u.ads || !u.ads[idx]) return;
+  const a = u.ads[idx];
+  if(a.status !== 'Pending') return;
+  a.status = 'Active';
+  u.notices = u.notices||[];
+  u.notices.unshift({id:Date.now(), title:'Ad Approved!', body:'আপনার Advertisement Approve হয়েছে এবং এখন Active।', time:'Just now'});
+  localStorage.setItem('solix_users', JSON.stringify(users));
+  if(window.fbSaveUser && u.authUid) window.fbSaveUser(u);
+  renderAdminAds();
+  toast('Ad Approved');
+}
+function adminRejectAd(uid, idx){
+  const u = users[uid]; if(!u || !u.ads || !u.ads[idx]) return;
+  const a = u.ads[idx];
+  if(a.status !== 'Pending') return;
+  a.status = 'Rejected';
+  u.deposited = (u.deposited||0) + (a.price||0);
+  u.notices = u.notices||[];
+  u.notices.unshift({id:Date.now(), title:'Ad Rejected', body:'Advertisement Reject হয়েছে। ৳'+(a.price||0)+' Deposit-এ ফেরত দেওয়া হয়েছে।', time:'Just now'});
+  localStorage.setItem('solix_users', JSON.stringify(users));
+  if(window.fbSaveUser && u.authUid) window.fbSaveUser(u);
+  renderAdminAds();
+  toast('Ad Rejected + Refunded');
+}
+
+function getSiteContent(){
+  try {
+    return JSON.parse(localStorage.getItem('solix_site_content')||'{}');
+  } catch(e){ return {}; }
+}
+function loadSiteContentForm(){
+  const c = getSiteContent();
+  const set = (id,v)=>{ const e=document.getElementById(id); if(e) e.value = v||''; };
+  set('scHeroTitle', c.heroTitle);
+  set('scHeroSub', c.heroSub);
+  set('scMilestone', c.milestone);
+  set('scAddress', c.address);
+  set('scFacebook', c.facebook);
+  set('scTelegram', c.telegram);
+  set('scYoutube', c.youtube);
+  set('scCopyright', c.copyright);
+}
+function saveSiteContent(){
+  const c = {
+    heroTitle: document.getElementById('scHeroTitle')?.value?.trim()||'',
+    heroSub: document.getElementById('scHeroSub')?.value?.trim()||'',
+    milestone: document.getElementById('scMilestone')?.value?.trim()||'',
+    address: document.getElementById('scAddress')?.value?.trim()||'',
+    facebook: document.getElementById('scFacebook')?.value?.trim()||'',
+    telegram: document.getElementById('scTelegram')?.value?.trim()||'',
+    youtube: document.getElementById('scYoutube')?.value?.trim()||'',
+    copyright: document.getElementById('scCopyright')?.value?.trim()||''
+  };
+  localStorage.setItem('solix_site_content', JSON.stringify(c));
+  applySiteContent();
+  toast('Site Content saved!');
+}
+function applySiteContent(){
+  const c = getSiteContent();
+  // Apply social links if present
+  if(c.facebook){
+    document.querySelectorAll('a[href="#"]').forEach(a=>{
+      if(a.querySelector('.fa-facebook-f')) a.href = c.facebook;
+    });
+  }
+  if(c.telegram){
+    document.querySelectorAll('a[href="#"]').forEach(a=>{
+      if(a.querySelector('.fa-telegram')) a.href = c.telegram;
+    });
+  }
+  if(c.youtube){
+    document.querySelectorAll('a[href="#"]').forEach(a=>{
+      if(a.querySelector('.fa-youtube')) a.href = c.youtube;
+    });
+  }
+}
+// Apply on load
+document.addEventListener('DOMContentLoaded', ()=>{ try{ applySiteContent(); }catch(e){} });
 </script>
 
 
+
+
+<!-- ===================== ADMIN PANEL ===================== -->
+<section id="adminPanel" class="hidden min-h-screen bg-slate-100">
+  <header class="bg-slate-900 text-white px-4 py-3 flex items-center justify-between sticky top-0 z-50 shadow-lg">
+    <div class="flex items-center gap-2">
+      <div class="w-9 h-9 rounded-xl bg-gradient-to-tr from-green-600 to-emerald-500 flex items-center justify-center font-bold text-sm">SP</div>
+      <div>
+        <p class="font-bold text-sm leading-tight">SolixPay Admin</p>
+        <p class="text-[10px] text-slate-400">Control Panel</p>
+      </div>
+    </div>
+    <div class="flex items-center gap-2">
+      <button onclick="doLogout()" class="bg-red-600 hover:bg-red-700 text-white text-xs font-bold px-3 py-1.5 rounded-lg"><i class="fa-solid fa-right-from-bracket"></i> Logout</button>
+    </div>
+  </header>
+
+  <div class="bg-white border-b border-slate-200 px-3 py-2 overflow-x-auto sticky top-[52px] z-40">
+    <div class="flex gap-2 min-w-max">
+      <button data-admin="overview" onclick="adminGo('overview')" class="admin-nav-btn bg-green-600 text-white text-xs font-semibold px-4 py-2 rounded-xl whitespace-nowrap">Overview</button>
+      <button data-admin="users" onclick="adminGo('users')" class="admin-nav-btn bg-slate-100 text-slate-700 text-xs font-semibold px-4 py-2 rounded-xl whitespace-nowrap">Users</button>
+      <button data-admin="deposits" onclick="adminGo('deposits')" class="admin-nav-btn bg-slate-100 text-slate-700 text-xs font-semibold px-4 py-2 rounded-xl whitespace-nowrap">Deposits</button>
+      <button data-admin="withdraws" onclick="adminGo('withdraws')" class="admin-nav-btn bg-slate-100 text-slate-700 text-xs font-semibold px-4 py-2 rounded-xl whitespace-nowrap">Withdraws</button>
+      <button data-admin="verifications" onclick="adminGo('verifications')" class="admin-nav-btn bg-slate-100 text-slate-700 text-xs font-semibold px-4 py-2 rounded-xl whitespace-nowrap">Verify</button>
+      <button data-admin="jobs" onclick="adminGo('jobs')" class="admin-nav-btn bg-slate-100 text-slate-700 text-xs font-semibold px-4 py-2 rounded-xl whitespace-nowrap">Jobs</button>
+      <button data-admin="reports" onclick="adminGo('reports')" class="admin-nav-btn bg-slate-100 text-slate-700 text-xs font-semibold px-4 py-2 rounded-xl whitespace-nowrap">Reports</button>
+      <button data-admin="ads" onclick="adminGo('ads')" class="admin-nav-btn bg-slate-100 text-slate-700 text-xs font-semibold px-4 py-2 rounded-xl whitespace-nowrap">Ads</button>
+      <button data-admin="notices" onclick="adminGo('notices')" class="admin-nav-btn bg-slate-100 text-slate-700 text-xs font-semibold px-4 py-2 rounded-xl whitespace-nowrap">Notices</button>
+      <button data-admin="content" onclick="adminGo('content')" class="admin-nav-btn bg-slate-100 text-slate-700 text-xs font-semibold px-4 py-2 rounded-xl whitespace-nowrap">Site Content</button>
+      <button data-admin="settings" onclick="adminGo('settings')" class="admin-nav-btn bg-slate-100 text-slate-700 text-xs font-semibold px-4 py-2 rounded-xl whitespace-nowrap">Settings</button>
+
+    </div>
+  </div>
+
+  <div class="p-3 pb-10 max-w-3xl mx-auto">
+    <div id="admin-overview" class="">
+      <h2 class="font-bold text-lg text-slate-900 mb-3">Dashboard Overview</h2>
+      <div class="grid grid-cols-2 sm:grid-cols-3 gap-3 mb-4">
+        <div class="bg-white rounded-2xl p-4 border border-slate-200 shadow-sm text-center">
+          <p class="text-[10px] uppercase text-slate-400 font-semibold">Total Users</p>
+          <p class="text-2xl font-extrabold text-slate-900" id="admStatUsers">0</p>
+        </div>
+        <div class="bg-white rounded-2xl p-4 border border-slate-200 shadow-sm text-center">
+          <p class="text-[10px] uppercase text-slate-400 font-semibold">Pending Deposit</p>
+          <p class="text-2xl font-extrabold text-amber-600" id="admStatPendingDep">0</p>
+        </div>
+        <div class="bg-white rounded-2xl p-4 border border-slate-200 shadow-sm text-center">
+          <p class="text-[10px] uppercase text-slate-400 font-semibold">Pending Withdraw</p>
+          <p class="text-2xl font-extrabold text-amber-600" id="admStatPendingWd">0</p>
+        </div>
+        <div class="bg-white rounded-2xl p-4 border border-slate-200 shadow-sm text-center">
+          <p class="text-[10px] uppercase text-slate-400 font-semibold">Pending Verify</p>
+          <p class="text-2xl font-extrabold text-amber-600" id="admStatPendingVer">0</p>
+        </div>
+        <div class="bg-white rounded-2xl p-4 border border-slate-200 shadow-sm text-center">
+          <p class="text-[10px] uppercase text-slate-400 font-semibold">Active Jobs</p>
+          <p class="text-2xl font-extrabold text-slate-900" id="admStatJobs">0</p>
+        </div>
+        <div class="bg-white rounded-2xl p-4 border border-slate-200 shadow-sm text-center">
+          <p class="text-[10px] uppercase text-slate-400 font-semibold">Total Earning</p>
+          <p class="text-xl font-extrabold text-green-600" id="admStatEarned">৳0</p>
+        </div>
+      </div>
+      <div class="bg-white rounded-2xl p-4 border border-slate-200 shadow-sm">
+        <p class="text-sm font-semibold text-slate-700 mb-2">Quick Actions</p>
+        <div class="flex flex-wrap gap-2">
+          <button onclick="adminGo('deposits')" class="bg-amber-500 text-white text-xs font-bold px-4 py-2 rounded-xl">Review Deposits</button>
+          <button onclick="adminGo('withdraws')" class="bg-orange-500 text-white text-xs font-bold px-4 py-2 rounded-xl">Review Withdraws</button>
+          <button onclick="adminGo('verifications')" class="bg-blue-500 text-white text-xs font-bold px-4 py-2 rounded-xl">Review Verifies</button>
+          <button onclick="adminGo('users')" class="bg-slate-800 text-white text-xs font-bold px-4 py-2 rounded-xl">Manage Users</button>
+        </div>
+      </div>
+    </div>
+
+    <div id="admin-users" class="hidden">
+      <h2 class="font-bold text-lg text-slate-900 mb-3">Users Management</h2>
+      <div id="adminUsersList" class="space-y-3"></div>
+    </div>
+
+    <div id="admin-deposits" class="hidden">
+      <h2 class="font-bold text-lg text-slate-900 mb-3">Deposit Requests</h2>
+      <p class="text-xs text-slate-500 mb-3">Approve করলে Balance যোগ হবে। Unlock Deposit হলে Jobs Unlock + ৳৫০ বোনাস।</p>
+      <div id="adminDepList" class="space-y-3"></div>
+    </div>
+
+    <div id="admin-withdraws" class="hidden">
+      <h2 class="font-bold text-lg text-slate-900 mb-3">Withdraw Requests</h2>
+      <p class="text-xs text-slate-500 mb-3">Approve = টাকা পাঠান। Reject = ব্যালেন্স ফেরত।</p>
+      <div id="adminWdList" class="space-y-3"></div>
+    </div>
+
+    <div id="admin-verifications" class="hidden">
+      <h2 class="font-bold text-lg text-slate-900 mb-3">Identity Verifications</h2>
+      <div id="adminVerList" class="space-y-3"></div>
+    </div>
+
+    <div id="admin-jobs" class="hidden">
+      <h2 class="font-bold text-lg text-slate-900 mb-3">All Jobs Control</h2>
+      <div id="adminJobsList" class="space-y-3"></div>
+    </div>
+
+    <div id="admin-reports" class="hidden">
+      <h2 class="font-bold text-lg text-slate-900 mb-3">User Reports</h2>
+      <div id="adminReportsList" class="space-y-3"></div>
+    </div>
+
+    <div id="admin-notices" class="hidden">
+      <h2 class="font-bold text-lg text-slate-900 mb-3">Broadcast Notice</h2>
+      <div class="bg-white rounded-2xl border border-slate-200 p-5 shadow-sm">
+        <label class="block text-sm font-semibold text-slate-700 mb-1">Title</label>
+        <input type="text" id="admNoticeTitle" class="input-f mb-3" placeholder="Notice title">
+        <label class="block text-sm font-semibold text-slate-700 mb-1">Body</label>
+        <textarea id="admNoticeBody" class="input-f h-24 mb-4 resize-none" placeholder="Notice message..."></textarea>
+        <button onclick="adminBroadcast()" class="w-full bg-green-600 hover:bg-green-700 text-white font-bold py-3 rounded-xl">Send to All Users</button>
+      </div>
+    </div>
+
+    <div id="admin-ads" class="hidden">
+      <h2 class="font-bold text-lg text-slate-900 mb-3">Advertisement Requests</h2>
+      <p class="text-xs text-slate-500 mb-3">Pending Ads Approve করলে Active হবে। Reject করলে Deposit ফেরত।</p>
+      <div id="adminAdsList" class="space-y-3"></div>
+    </div>
+
+    <div id="admin-content" class="hidden">
+      <h2 class="font-bold text-lg text-slate-900 mb-3">Site Content & Links</h2>
+      <p class="text-xs text-slate-500 mb-3">হোম পেজ, ফুটার, সোশ্যাল লিংক এডিট করুন। সেভ করলে সাইটে দেখা যাবে।</p>
+      <div class="bg-white rounded-2xl border border-slate-200 p-5 shadow-sm space-y-3">
+        <label class="block text-sm font-semibold">Hero Title</label>
+        <input type="text" id="scHeroTitle" class="input-f" placeholder="Best Microjob & Freelancing Site...">
+        <label class="block text-sm font-semibold">Hero Subtitle</label>
+        <input type="text" id="scHeroSub" class="input-f" placeholder="Small Gigs. Big Results.">
+        <label class="block text-sm font-semibold">Milestone Text</label>
+        <input type="text" id="scMilestone" class="input-f" placeholder="1 LAKH USERS">
+        <label class="block text-sm font-semibold">Address</label>
+        <textarea id="scAddress" class="input-f h-16 resize-none" placeholder="House 12, Road 5..."></textarea>
+        <label class="block text-sm font-semibold">Facebook Page URL</label>
+        <input type="url" id="scFacebook" class="input-f" placeholder="https://facebook.com/...">
+        <label class="block text-sm font-semibold">Telegram Channel/Group URL</label>
+        <input type="url" id="scTelegram" class="input-f" placeholder="https://t.me/...">
+        <label class="block text-sm font-semibold">YouTube Channel URL</label>
+        <input type="url" id="scYoutube" class="input-f" placeholder="https://youtube.com/...">
+        <label class="block text-sm font-semibold">Footer Copyright</label>
+        <input type="text" id="scCopyright" class="input-f" placeholder="© 2026 SOLIXPAY All Rights Reserved.">
+        <button onclick="saveSiteContent()" class="w-full bg-green-600 hover:bg-green-700 text-white font-bold py-3 rounded-xl mt-2">Save Content</button>
+      </div>
+    </div>
+
+    <div id="admin-settings" class="hidden">
+      <h2 class="font-bold text-lg text-slate-900 mb-3">Site Settings</h2>
+
+      <div class="bg-white rounded-2xl border border-slate-200 p-5 shadow-sm space-y-4">
+        <div>
+          <label class="block text-sm font-semibold text-slate-700 mb-1">Unlock Earning Threshold (৳)</label>
+          <input type="number" id="admUnlockNeed" class="input-f" value="500">
+        </div>
+        <div>
+          <label class="block text-sm font-semibold text-slate-700 mb-1">Deposit Min (৳)</label>
+          <input type="number" id="admDepMin" class="input-f" value="500">
+        </div>
+        <div>
+          <label class="block text-sm font-semibold text-slate-700 mb-1">Withdraw Min (৳)</label>
+          <input type="number" id="admWdMin" class="input-f" value="500">
+        </div>
+        <button onclick="adminSaveSettings()" class="w-full bg-slate-900 hover:bg-slate-800 text-white font-bold py-3 rounded-xl">Save Settings</button>
+      </div>
+      <div class="bg-amber-50 border border-amber-200 rounded-2xl p-4 mt-4 text-sm text-amber-900">
+        <p class="font-bold mb-1">Admin Access</p>
+        <p class="text-xs leading-relaxed">Admin হওয়ার জন্য ইমেইল: <b>admin@solixpay.com</b> / <b>admin@gmail.com</b> / <b>solixadmin@gmail.com</b>। অথবা Users ট্যাব থেকে Make Admin করুন।</p>
+      </div>
+    </div>
+  </div>
+</section>
+
 <!-- TOP LIST MODAL -->
 <div id="topListModal" class="fixed inset-0 z-[58] hidden flex items-end sm:items-center justify-center p-0 sm:p-4">
+
   <div class="absolute inset-0 bg-black/50 backdrop-blur-sm" onclick="closeTopList()"></div>
   <div class="relative bg-white rounded-t-3xl sm:rounded-3xl shadow-2xl w-full max-w-md max-h-[88vh] flex flex-col overflow-hidden border border-slate-200 z-10">
     <div class="px-5 pt-5 pb-3 text-center border-b border-slate-100">
