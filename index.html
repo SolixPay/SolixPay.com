@@ -46,7 +46,7 @@ function renderUserChatMessages(msgs){
   let html = welcome;
   msgs.forEach(m => {
     const text = String(m.text || '').replace(/</g, '&lt;');
-    const time = m.time || '';
+    const time = m.time || (typeof formatChatTime === 'function' ? formatChatTime(m.ts) : '') || '';
     if(m.fromAdmin){
       html += `<div class="flex gap-2">
         <div class="w-7 h-7 rounded-full bg-slate-900 text-white text-xs flex items-center justify-center flex-shrink-0">A</div>
@@ -110,19 +110,31 @@ function closeLiveChat(){
   document.getElementById('liveChat').classList.add('hidden');
   if(typeof markChatSeen === 'function') markChatSeen();
 }
+function formatChatTime(ts){
+  try {
+    const d = ts ? new Date(ts) : new Date();
+    if(isNaN(d.getTime())) return new Date().toLocaleString();
+    return d.toLocaleString(undefined, { year:'numeric', month:'short', day:'numeric', hour:'2-digit', minute:'2-digit' });
+  } catch(e){
+    return new Date().toLocaleString();
+  }
+}
+
 async function sendChat(){
   const input = document.getElementById('chatInput');
   const msg = (input?.value || '').trim();
   if(!msg) return;
   const key = getUserChatKey();
   const fromName = (typeof currentUser !== 'undefined' && currentUser && currentUser.name) || 'Guest';
+  const nowTs = Date.now();
+  const timeStr = formatChatTime(nowTs);
   const payload = {
     fromId: key,
     fromName,
     to: 'admin',
     text: msg,
-    time: new Date().toLocaleString(),
-    ts: Date.now(),
+    time: timeStr,
+    ts: nowTs,
     unread: true,
     fromAdmin: false,
     threadId: key
@@ -144,20 +156,22 @@ async function sendChat(){
 
   const box = document.getElementById('chatMessages');
   if(box){
-    box.innerHTML += `<div class="flex gap-2 justify-end"><div class="bg-green-600 text-white rounded-2xl rounded-tr-sm px-3 py-2 text-sm max-w-[80%]"><p class="whitespace-pre-wrap">${msg.replace(/</g,'&lt;')}</p></div></div>`;
+    box.innerHTML += `<div class="flex gap-2 justify-end"><div class="bg-green-600 text-white rounded-2xl rounded-tr-sm px-3 py-2 text-sm max-w-[80%]"><p class="whitespace-pre-wrap">${msg.replace(/</g,'&lt;')}</p><p class="text-[10px] text-green-100 mt-1">${timeStr}</p></div></div>`;
     box.scrollTop = box.scrollHeight;
   }
 
   // Only first message: one connecting auto-reply (no fake random replies)
   if(isFirstUserMsg){
+    const autoTs = Date.now() + 1;
+    const autoTime = formatChatTime(autoTs);
     const auto = {
       fromId: 'admin',
       fromName: 'Support',
       to: key,
       threadId: key,
       text: 'অপেক্ষা করুন, Agent এর সাথে কানেক্ট করা হচ্ছে...',
-      time: new Date().toLocaleString(),
-      ts: Date.now() + 1,
+      time: autoTime,
+      ts: autoTs,
       unread: false,
       fromAdmin: true,
       isAuto: true
@@ -165,7 +179,7 @@ async function sendChat(){
     try {
       if(window.fbAddChat) await window.fbAddChat(auto);
       else if(box){
-        box.innerHTML += `<div class="flex gap-2"><div class="w-7 h-7 rounded-full bg-slate-900 text-white text-xs flex items-center justify-center flex-shrink-0">A</div><div class="bg-white rounded-2xl rounded-tl-sm px-3 py-2 text-sm shadow-sm max-w-[80%] border border-slate-200">${auto.text}</div></div>`;
+        box.innerHTML += `<div class="flex gap-2"><div class="w-7 h-7 rounded-full bg-slate-900 text-white text-xs flex items-center justify-center flex-shrink-0">A</div><div class="bg-white rounded-2xl rounded-tl-sm px-3 py-2 text-sm shadow-sm max-w-[80%] border border-slate-200"><p class="whitespace-pre-wrap">${auto.text}</p><p class="text-[10px] text-slate-400 mt-1">${autoTime}</p></div></div>`;
         box.scrollTop = box.scrollHeight;
       }
     } catch(e){ console.error(e); }
@@ -881,7 +895,7 @@ body.dark-theme .side-item:hover,body.dark-theme .side-item.active{background:#0
   <header class="bg-green-600 text-white px-3 py-3 flex items-center justify-between sticky top-0 z-45 shadow-md">
     <button onclick="toggleSide()" class="w-9 h-9 flex items-center justify-center rounded-lg hover:bg-white/15"><i class="fa-solid fa-bars text-lg"></i></button>
     <div class="flex-1 flex items-center justify-center gap-1.5 min-w-0 px-2">
-      <button onclick="goView('notify');markNotifySeen()" class="relative w-9 h-9 rounded-lg hover:bg-white/15 flex items-center justify-center flex-shrink-0">
+      <button onclick="toggleNotifyView()" class="relative w-9 h-9 rounded-lg hover:bg-white/15 flex items-center justify-center flex-shrink-0">
         <i class="fa-solid fa-bell"></i>
         <span id="notifyBadge" class="hidden absolute top-1.5 right-1.5 w-2.5 h-2.5 bg-red-500 rounded-full ring-2 ring-green-600"></span>
       </button>
@@ -1360,7 +1374,7 @@ body.dark-theme .side-item:hover,body.dark-theme .side-item.active{background:#0
       <h2 class="font-bold text-slate-900 mb-3 text-lg">Latest notifications</h2>
       <div id="notifyList" class="space-y-3"></div>
       <p id="notifyEmpty" class="text-slate-600 text-sm font-medium">You Have No Notifications</p>
-      <p class="text-xs text-slate-400 mt-4">Note: 60 Day older Notifications will get deleted</p>
+      <p class="text-xs text-slate-400 mt-4">Note: 30 Day older Notifications will get deleted</p>
     </div>
   </div>
 
@@ -1775,7 +1789,7 @@ body.dark-theme .side-item:hover,body.dark-theme .side-item.active{background:#0
         <a href="#" onclick="goView('accepted')" class="side-item pl-5"><i class="fa-solid fa-check icon"></i> Accepted Task</a>
       </div>
       <a href="#" id="sideMyJobs" onclick="goView('myjobs')" class="side-item"><i class="fa-solid fa-briefcase icon"></i> My Jobs</a>
-      <a href="#" onclick="goView('notify');markNotifySeen()" class="side-item relative"><i class="fa-solid fa-bell icon"></i> Notifications<span id="sideNotifyBadge" class="hidden ml-auto w-2 h-2 bg-red-500 rounded-full"></span></a>
+      <a href="#" onclick="toggleNotifyView()" class="side-item relative"><i class="fa-solid fa-bell icon"></i> Notifications<span id="sideNotifyBadge" class="hidden ml-auto w-2 h-2 bg-red-500 rounded-full"></span></a>
       <a href="#" onclick="goView('deposit')" class="side-item"><i class="fa-solid fa-credit-card icon"></i> Deposit</a>
       <a href="#" onclick="goView('wallet')" class="side-item"><i class="fa-solid fa-wallet icon"></i> Wallet</a>
       <a href="#" onclick="goView('referral')" class="side-item"><i class="fa-solid fa-share-nodes icon"></i> Share & Earn</a>
@@ -2070,6 +2084,22 @@ function markNotifySeen(){
   }
   updateNotifyBadge();
   renderNotifyList();
+}
+/** Click notification icon: open page; click again → close (back to previous view) */
+function toggleNotifyView(){
+  const el = document.getElementById('view-notify');
+  const isOpen = el && !el.classList.contains('hidden');
+  if(isOpen){
+    const fallback = (currentUser && (currentUser.mode||'Worker')==='Buyer') ? 'myjobs' : 'jobs';
+    let back = window._prevViewBeforeNotify || fallback;
+    if(back === 'notify' || back === 'jobdetail') back = fallback;
+    goView(back);
+  } else {
+    window._prevViewBeforeNotify = (window._lastView && window._lastView !== 'notify')
+      ? window._lastView
+      : ((currentUser && (currentUser.mode||'Worker')==='Buyer') ? 'myjobs' : 'jobs');
+    goView('notify');
+  }
 }
 function markChatSeen(){
   chatUnread = false;
@@ -4155,6 +4185,8 @@ async function initAdmin(){
   } catch(e){ console.error(e); }
   adminGo('overview');
   loadAdminStats();
+  // Live Support: real-time so user messages show in Admin panel instantly
+  try { startAdminChatListener(); } catch(e){}
   // Auto-refresh admin badges & pending counts every 20s so red dots stay live
   if(window._adminRefreshTimer) clearInterval(window._adminRefreshTimer);
   window._adminRefreshTimer = setInterval(async ()=>{
@@ -4241,7 +4273,10 @@ function adminGo(view){
   if(view==='jobs') renderAdminJobs();
   if(view==='reports') renderAdminReports();
   if(view==='ads') renderAdminAds();
-  if(view==='chat') renderAdminChat();
+  if(view==='chat'){
+    renderAdminChat();
+    startAdminChatListener();
+  }
   if(view==='rewards') renderAdminRewards();
   if(view==='content') loadSiteContentForm();
   if(view==='settings') loadAdminSettingsForm();
@@ -5054,16 +5089,29 @@ function saveChatStore(list){
 
 let _adminChatList = [];
 let _adminActiveThread = null; // user key (authUid or userId)
+window._adminChatUnsub = window._adminChatUnsub || null;
 
-async function renderAdminChat(){
-  try {
-    _adminChatList = await getChatStore();
-  } catch(e){ _adminChatList = []; }
+/** Real-time listener so user messages appear in Admin Live Chat immediately */
+function startAdminChatListener(){
+  if(!window.fbListenChats) return;
+  if(window._adminChatUnsub){ try { window._adminChatUnsub(); } catch(e){} window._adminChatUnsub = null; }
+  window._adminChatUnsub = window.fbListenChats((list) => {
+    _adminChatList = list || [];
+    _chatCache = list || [];
+    const chatPanel = document.getElementById('admin-chat');
+    const open = chatPanel && !chatPanel.classList.contains('hidden');
+    if(open){
+      renderAdminChatFromCache();
+    }
+    try { loadAdminStats(); } catch(e){}
+  });
+}
 
+/** Render from already-loaded _adminChatList (no extra Firestore fetch) */
+function renderAdminChatFromCache(){
   const threadsEl = document.getElementById('adminChatThreads');
   if(!threadsEl) return;
 
-  // Group by threadId / fromId (non-admin)
   const threads = {};
   (_adminChatList || []).forEach(m => {
     const key = m.threadId || (m.fromAdmin ? m.to : m.fromId) || 'unknown';
@@ -5086,6 +5134,7 @@ async function renderAdminChat(){
   } else {
     threadsEl.innerHTML = list.map(t => {
       const last = t.msgs.slice().sort((a,b)=>(b.ts||0)-(a.ts||0))[0];
+      const lastTime = (last && (last.time || (typeof formatChatTime === 'function' ? formatChatTime(last.ts) : ''))) || '';
       const active = _adminActiveThread === t.key ? 'bg-green-50 border-green-200' : 'bg-white border-transparent hover:bg-slate-50';
       const badge = t.unread ? `<span class="bg-red-500 text-white text-[10px] font-bold px-1.5 py-0.5 rounded-full">${t.unread}</span>` : '';
       return `<button type="button" onclick="adminOpenThread('${String(t.key).replace(/'/g,"\\'")}')" class="w-full text-left border rounded-xl p-2.5 ${active}">
@@ -5095,12 +5144,19 @@ async function renderAdminChat(){
         </div>
         <p class="text-[10px] text-slate-500 font-mono truncate mt-0.5">ID: ${t.key}</p>
         <p class="text-[11px] text-slate-500 truncate mt-0.5">${(last && last.text) || ''}</p>
-        <p class="text-[10px] text-slate-400 mt-0.5">${(last && last.time) || ''}</p>
+        <p class="text-[10px] text-slate-400 mt-0.5">${lastTime}</p>
       </button>`;
     }).join('');
   }
 
   if(_adminActiveThread) adminOpenThread(_adminActiveThread, true);
+}
+
+async function renderAdminChat(){
+  try {
+    _adminChatList = await getChatStore();
+  } catch(e){ _adminChatList = []; }
+  renderAdminChatFromCache();
   loadAdminStats();
 }
 
@@ -5140,7 +5196,7 @@ async function adminOpenThread(key, silent){
       return `<div class="flex ${mine?'justify-end':''} group">
         <div class="max-w-[85%] rounded-2xl px-3 py-2 text-sm ${mine?'bg-green-600 text-white rounded-tr-sm':'bg-white border border-slate-200 text-slate-800 rounded-tl-sm'}">
           <p class="whitespace-pre-wrap" id="chatMsgText_${docId}">${(m.text||'').replace(/</g,'&lt;')}</p>
-          <p class="text-[10px] ${mine?'text-green-100':'text-slate-400'} mt-1">${m.time||''}${m.edited?' (edited)':''}</p>
+          <p class="text-[10px] ${mine?'text-green-100':'text-slate-400'} mt-1">${(m.time || (typeof formatChatTime === 'function' ? formatChatTime(m.ts) : '') || '')}${m.edited?' (edited)':''}</p>
           <div class="flex gap-2 mt-1.5 ${mine?'justify-end':''}">
             <button type="button" onclick="adminEditChatMsg('${safeId}')" class="text-[10px] font-semibold ${mine?'text-green-100 hover:text-white':'text-blue-600 hover:underline'}">Edit</button>
             <button type="button" onclick="adminDeleteChatMsg('${safeId}')" class="text-[10px] font-semibold ${mine?'text-red-200 hover:text-white':'text-red-500 hover:underline'}">Delete</button>
@@ -5166,14 +5222,15 @@ async function adminReplyInThread(){
   const input = document.getElementById('adminChatReplyInput');
   const textMsg = (input?.value || '').trim();
   if(!textMsg) return;
+  const replyTs = Date.now();
   const payload = {
     fromId: 'admin',
     fromName: 'Admin',
     to: _adminActiveThread,
     threadId: _adminActiveThread,
     text: textMsg,
-    time: new Date().toLocaleString(),
-    ts: Date.now(),
+    time: (typeof formatChatTime === 'function' ? formatChatTime(replyTs) : new Date().toLocaleString()),
+    ts: replyTs,
     unread: true,
     fromAdmin: true
   };
