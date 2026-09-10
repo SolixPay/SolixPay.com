@@ -523,7 +523,7 @@ body.dark-theme .side-item:hover,body.dark-theme .side-item.active{background:#0
             </div>
             
             <label class="flex items-center gap-2 text-sm text-slate-700 mb-5 font-medium">
-              <input type="checkbox" class="w-4 h-4 rounded text-green-600 accent-green-600"> Remember me
+              <input type="checkbox" id="loginRemember" class="w-4 h-4 rounded text-green-600 accent-green-600"> Remember me <span class="text-red-500 text-xs">*</span>
             </label>
             
             <button onclick="doLogin()" class="w-full bg-green-600 hover:bg-green-700 text-white font-bold py-3.5 rounded-xl shadow-lg shadow-green-600/30 transition">Login</button>
@@ -1913,25 +1913,23 @@ function closeTopList(){
 }
 
 /* ===== Notification & Chat badges ===== */
-// Default site notices (global templates)
-const DEFAULT_NOTICES = [
-  {id:2, title:'উইথড্র নোটিশ', body:'bKash/Nagad এ ২৪ ঘন্টার মধ্যে উইথড্র প্রসেস হয়।', time:'1 hour ago'}
-];
+// Default site notices — empty; withdraw notice only after user submits withdraw
+const DEFAULT_NOTICES = [];
 let siteNotices = [];
 let chatUnread = false;
 
 function loadUserNotices(){
   // Per-user seen IDs stored in user object
   if(!currentUser) {
-    siteNotices = DEFAULT_NOTICES.map(n => ({...n, unread:true}));
+    siteNotices = [];
     return;
   }
   if(!currentUser.seenNoticeIds) currentUser.seenNoticeIds = [];
   if(!currentUser.notices) currentUser.notices = [];
   // Only keep notices from last 1 month
   currentUser.notices = (currentUser.notices||[]).filter(n => !isOlderThanOneMonth(n));
-  // Merge defaults + user notices, mark unread based on seenNoticeIds
-  const all = [...DEFAULT_NOTICES, ...(currentUser.notices||[])];
+  // User notices only (no global withdraw notice on register)
+  const all = [...(currentUser.notices||[])];
   // Deduplicate by id
   const map = {};
   all.forEach(n => { map[n.id] = n; });
@@ -2103,6 +2101,8 @@ async function doLogin(){
   const id=document.getElementById('loginId').value.trim().toLowerCase();
   const p=document.getElementById('loginPass').value;
   if(!id || !p) return toast('Email ও Password দিন','err');
+  const rememberEl = document.getElementById('loginRemember');
+  if(rememberEl && !rememberEl.checked) return toast('Login করতে Remember me চেক করুন','err');
   if(!window.fbLogin) return toast('Firebase লোড হচ্ছে, একটু অপেক্ষা করুন','err');
 
   // Login only with Email (User ID is Firebase UID, shown after login)
@@ -2592,10 +2592,8 @@ function renderJobs(){
   const el = document.getElementById('jobList');
   if(!el) return;
   if(!list.length){
-    const locked = currentUser && !isJobsUnlocked(currentUser);
-    el.innerHTML = locked
-      ? '<div class="text-center text-slate-400 text-sm py-10">এখন শুধু Gmail Account ও Telegram কাজ দেখা যাচ্ছে।<br><span class="text-xs">অন্য কাজ পেতে ৳৫০০ Earning প্রয়োজন।</span></div>'
-      : '<div class="text-center text-slate-400 text-sm py-10">No jobs found</div>';
+    // No jobs → keep area empty (no placeholder text)
+    el.innerHTML = '';
     return;
   }
   el.innerHTML = list.map((j,idx)=>{
@@ -3138,7 +3136,8 @@ async function submitVerify(){
     docType, name, number,
     photoName: photo.files[0].name,
     photoUrl: photoUrl,
-    submittedAt: new Date().toLocaleString()
+    submittedAt: new Date().toLocaleString(),
+    ts: Date.now()
   };
   save();
   updateUI();
@@ -3363,6 +3362,8 @@ function submitWithdraw(){
     time: new Date().toLocaleString(),
     ts: Date.now()
   });
+  // Withdraw notice only after user submits a withdraw request
+  pushNotice('উইথড্র নোটিশ', 'bKash/Nagad এ ২৪ ঘন্টার মধ্যে উইথড্র প্রসেস হয়।');
   save();
   updateUI();
   renderWallet();
@@ -3434,6 +3435,7 @@ async function submitAd(){
     price: selectedAdPrice,
     status: 'Pending',
     time: new Date().toLocaleString(),
+    ts: Date.now(),
     bannerName: banner.files[0].name,
     bannerUrl: bannerUrl,
     userId: currentUser.userId,
@@ -3650,7 +3652,9 @@ async function submitPostJob(){
     estDays: estDays,
     screens: Math.min(Math.max(screens, 0), 2),
     ownerId: currentUser.userId,
-    thumbUrl: thumbUrl || null
+    thumbUrl: thumbUrl || null,
+    adminUnread: true,
+    createdAt: Date.now()
   };
   JOBS.unshift(pubJob);
   try {
@@ -4020,6 +4024,63 @@ async function initAdmin(){
   } catch(e){ console.error(e); }
   adminGo('overview');
   loadAdminStats();
+  // Auto-refresh admin badges & pending counts every 20s so red dots stay live
+  if(window._adminRefreshTimer) clearInterval(window._adminRefreshTimer);
+  window._adminRefreshTimer = setInterval(async ()=>{
+    try {
+      if(window.fbLoadAllUsers) {
+        const map = await window.fbLoadAllUsers();
+        Object.values(map||{}).forEach(u => {
+          if(u && u.authUid) { u.userId = u.authUid; users[u.authUid] = u; }
+        });
+      }
+      if(window.fbLoadChats) {
+        _adminChatList = await window.fbLoadChats();
+        _chatCache = _adminChatList;
+      }
+      if(window.fbLoadReports) _adminReportsCache = await window.fbLoadReports();
+      if(window.fbLoadRewardClaims) _rewardClaimsCache = await window.fbLoadRewardClaims();
+      loadAdminStats();
+    } catch(e){}
+  }, 20000);
+}
+
+// Admin nav red-dot: show on new work; clear when admin opens that section; reappear on newer work
+let _adminSectionSeen = {};
+try { _adminSectionSeen = JSON.parse(localStorage.getItem('sp_admin_seen') || '{}') || {}; } catch(e){ _adminSectionSeen = {}; }
+
+function adminItemTs(item){
+  if(!item) return 0;
+  if(item.ts) return Number(item.ts) || 0;
+  if(item.createdAt) return Number(item.createdAt) || 0;
+  if(item.id && typeof item.id === 'number' && item.id > 1e11) return item.id;
+  if(item.time){ const p = Date.parse(item.time); return isNaN(p) ? 0 : p; }
+  if(item.submittedAt){ const p = Date.parse(item.submittedAt); return isNaN(p) ? 0 : p; }
+  if(item.banDate){ const p = Date.parse(item.banDate); return isNaN(p) ? 0 : p; }
+  return 0;
+}
+function markAdminSectionSeen(section){
+  _adminSectionSeen[section] = Date.now();
+  try { localStorage.setItem('sp_admin_seen', JSON.stringify(_adminSectionSeen)); } catch(e){}
+  // Jobs: also clear adminUnread flags
+  if(section === 'jobs'){
+    (JOBS||[]).forEach(j => {
+      if(j && j.adminUnread === true){
+        j.adminUnread = false;
+        if(j._docId && window.fbUpdateJob) window.fbUpdateJob(j._docId, { adminUnread: false }).catch(()=>{});
+      }
+    });
+  }
+  loadAdminStats();
+}
+function hasUnseenAdminItems(section, items){
+  const seen = Number(_adminSectionSeen[section] || 0);
+  if(!items || !items.length) return false;
+  if(seen === 0) return true; // never opened → show if any items
+  return items.some(it => {
+    const t = adminItemTs(it);
+    return t === 0 ? false : t > seen;
+  });
 }
 
 function adminGo(view){
@@ -4037,6 +4098,10 @@ function adminGo(view){
     active.classList.remove('bg-slate-100','text-slate-700');
     active.classList.add('bg-green-600','text-white');
   }
+  // Opening a section clears its red badge (until new work arrives)
+  const badgeSections = ['suspended','deposits','withdraws','verifications','jobs','reports','ads','chat','rewards'];
+  if(badgeSections.includes(view)) markAdminSectionSeen(view);
+
   if(view==='users') renderAdminUsers();
   if(view==='suspended') renderAdminSuspended();
   if(view==='deposits') renderAdminDeposits();
@@ -4056,13 +4121,38 @@ function adminGo(view){
 function loadAdminStats(){
   let totalUsers = Object.keys(users).length;
   let pendingDep = 0, pendingWd = 0, pendingVer = 0, totalEarned = 0, totalDep = 0;
+  let suspendedCount = 0, pendingAds = 0, pendingRewards = 0;
+  const depItems = [], wdItems = [], verItems = [], susItems = [], adItems = [];
   Object.values(users).forEach(u=>{
     totalEarned += (u.earned||0);
     totalDep += (u.deposited||0);
-    (u.deposits||[]).forEach(d=>{ if(d.status==='Pending') pendingDep++; });
-    (u.withdraws||[]).forEach(w=>{ if(w.status==='Pending') pendingWd++; });
-    if(u.verifyStatus==='pending') pendingVer++;
+    (u.deposits||[]).forEach(d=>{ if(d.status==='Pending'){ pendingDep++; depItems.push(d); } });
+    (u.withdraws||[]).forEach(w=>{ if(w.status==='Pending'){ pendingWd++; wdItems.push(w); } });
+    if(u.verifyStatus==='pending'){
+      pendingVer++;
+      verItems.push({ ...(u.verifyData||{}), ts: (u.verifyData&&u.verifyData.ts) || adminItemTs(u.verifyData) || 0 });
+    }
+    if(u.banned && !u.permanentBan){
+      suspendedCount++;
+      susItems.push({ banDate: u.banDate, ts: u.banTs || adminItemTs({ banDate: u.banDate, time: u.banDate }) });
+    }
+    (u.ads||[]).forEach(a=>{ if(a.status==='Pending'){ pendingAds++; adItems.push(a); } });
   });
+  let rewardItems = [];
+  try {
+    const claims = (typeof getRewardClaims === 'function') ? getRewardClaims() : (_rewardClaimsCache||[]);
+    rewardItems = (claims||[]).filter(c => c.status==='Pending');
+    pendingRewards = rewardItems.length;
+  } catch(e){}
+  let chatItems = [];
+  try {
+    const chats = _adminChatList || _chatCache || [];
+    chatItems = chats.filter(m => m.unread && !m.fromAdmin);
+  } catch(e){}
+  let reportItems = [];
+  try {
+    reportItems = (_adminReportsCache||[]).filter(r => (r.status||'Open') !== 'Closed');
+  } catch(e){}
   const set = (id,v)=>{ const e=document.getElementById(id); if(e) e.textContent=v; };
   set('admStatUsers', totalUsers);
   set('admStatPendingDep', pendingDep);
@@ -4071,6 +4161,30 @@ function loadAdminStats(){
   set('admStatJobs', JOBS.length);
   set('admStatEarned', '৳'+totalEarned.toFixed(0));
   set('admStatDeposit', '৳'+totalDep.toFixed(0));
+
+  const showBadge = (id, show) => {
+    const el = document.getElementById(id);
+    if(el) el.classList.toggle('hidden', !show);
+  };
+  // Red badge only for UNSEEN new work (clears when admin opens that section; new work brings it back)
+  showBadge('badge-deposits', hasUnseenAdminItems('deposits', depItems));
+  showBadge('badge-withdraws', hasUnseenAdminItems('withdraws', wdItems));
+  showBadge('badge-verifications', hasUnseenAdminItems('verifications', verItems));
+  showBadge('badge-suspended', hasUnseenAdminItems('suspended', susItems));
+  showBadge('badge-ads', hasUnseenAdminItems('ads', adItems));
+  showBadge('badge-rewards', hasUnseenAdminItems('rewards', rewardItems));
+  showBadge('badge-chat', hasUnseenAdminItems('chat', chatItems));
+  showBadge('badge-reports', hasUnseenAdminItems('reports', reportItems));
+  // Jobs: buyer new post (adminUnread) or job created after last view
+  const seenJobs = Number(_adminSectionSeen.jobs || 0);
+  const unseenJobs = (JOBS||[]).filter(j => {
+    if(!j) return false;
+    if(j.adminUnread === true) return true;
+    const t = adminItemTs(j);
+    return seenJobs > 0 && t > seenJobs;
+  });
+  showBadge('badge-jobs', unseenJobs.length > 0);
+  showBadge('badge-users', false);
 }
 
 async function loadAllUsersCache(){
@@ -4222,6 +4336,7 @@ async function adminToggleBan(uid){
   u.banned = !u.banned;
   if(u.banned){
     u.banDate = new Date().toLocaleString();
+    u.banTs = Date.now();
     u.appealStatus = null;
     u.appealText = null;
     u.appealDate = null;
@@ -4229,6 +4344,7 @@ async function adminToggleBan(uid){
     u.notices.unshift({id:Date.now(), ts:Date.now(), title:'Account Suspended', body:'আপনার অ্যাকাউন্ট Suspend করা হয়েছে। আপনি Appeal দিতে পারেন। Admin ৩ মাসের মধ্যে resolve না করলে অ্যাকাউন্ট স্থায়ীভাবে মুছে যাবে।', time:new Date().toLocaleString()});
   } else {
     u.banDate = null;
+    u.banTs = null;
     u.appealStatus = null;
     u.appealText = null;
     u.appealDate = null;
@@ -4649,61 +4765,110 @@ async function loadSiteContentFromFb(){
   } catch(e){ _siteContentCache = _siteContentCache || {}; }
   return _siteContentCache;
 }
+const SITE_CONTENT_DEFAULTS = {
+  heroTitle: 'Best Microjob & Freelancing Site To Make Money Online',
+  heroSub: 'Small Gigs. Big Results.',
+  milestone: '1 LAKH USERS',
+  notice1: '🎉 নতুন ইউজারদের জন্য ৳৫০ বোনাস চালু!',
+  notice2: '⚡ bKash/Nagad এ ২৪ ঘন্টার মধ্যে উইথড্র',
+  notice3: '🔥 টপ জব: YouTube Watch ৳৩.৫০',
+  notice4: '📢 রেফারেল করে ৫% কমিশন নিন',
+  address: 'House 12, Road 5, Dhanmondi,\nDhaka-1205, Bangladesh',
+  about: 'SolixPay is the best microjob and freelancing platform to make money online. Small gigs, big results.',
+  privacy: 'Your privacy is important to us. We collect and use personal information only as needed to operate SolixPay services.',
+  terms: 'By using SolixPay you agree to our terms. Accounts must use accurate information. Fraud or abuse may result in suspension.',
+  faq: 'Q: How do I withdraw?\nA: Go to Wallet, select bKash/Nagad, enter amount (min ৳500). Processed within 24 hours.',
+  refund: 'Deposit refunds are handled case-by-case by admin. Contact support with transaction details.',
+  cancel: 'Job posts and ads may be cancelled before approval. After activation, cancellation is subject to admin review.',
+  contact: 'House 12, Road 5, Dhanmondi, Dhaka-1205, Bangladesh\nSupport: Live Chat inside the app',
+  facebook: '',
+  telegram: '',
+  youtube: '',
+  copyright: '© 2026 SOLIXPAY All Rights Reserved.',
+  topNotice1: '🎉 আজকের Top Worker লিস্ট লাইভ!',
+  topNotice2: '⏰ প্রতিদিন রাত ১২টায় লিস্ট আপডেট হয়',
+  topNotice3: '🔥 সবচেয়ে বেশি কাজ করে Top-এ উঠুন',
+  topNotice4: '🏆 সন্তুষ্ট/অ্যাপ্রুভড টাস্ক অনুযায়ী র‍্যাঙ্ক'
+};
 async function loadSiteContentForm(){
   await loadSiteContentFromFb();
-  const c = getSiteContent();
-  const set = (id,v)=>{ const e=document.getElementById(id); if(e) e.value = v||''; };
-  set('scHeroTitle', c.heroTitle);
-  set('scHeroSub', c.heroSub);
-  set('scMilestone', c.milestone);
-  set('scNotice1', c.notice1);
-  set('scNotice2', c.notice2);
-  set('scNotice3', c.notice3);
-  set('scNotice4', c.notice4);
-  set('scAddress', c.address);
-  set('scAbout', c.about);
-  set('scPrivacy', c.privacy);
-  set('scTerms', c.terms);
-  set('scFaq', c.faq);
-  set('scRefund', c.refund);
-  set('scCancel', c.cancel);
-  set('scContact', c.contact);
-  set('scFacebook', c.facebook);
-  set('scTelegram', c.telegram);
-  set('scYoutube', c.youtube);
-  set('scCopyright', c.copyright);
-  set('scTopNotice1', c.topNotice1);
-  set('scTopNotice2', c.topNotice2);
-  set('scTopNotice3', c.topNotice3);
-  set('scTopNotice4', c.topNotice4);
+  const c = getSiteContent() || {};
+  const set = (id, key)=>{
+    const e = document.getElementById(id);
+    if(!e) return;
+    // Saved value first, else keep HTML default / SITE_CONTENT_DEFAULTS
+    const v = (c[key] != null && String(c[key]).trim() !== '') ? c[key] : (SITE_CONTENT_DEFAULTS[key] || e.value || '');
+    e.value = v;
+  };
+  set('scHeroTitle', 'heroTitle');
+  set('scHeroSub', 'heroSub');
+  set('scMilestone', 'milestone');
+  set('scNotice1', 'notice1');
+  set('scNotice2', 'notice2');
+  set('scNotice3', 'notice3');
+  set('scNotice4', 'notice4');
+  set('scAddress', 'address');
+  set('scAbout', 'about');
+  set('scPrivacy', 'privacy');
+  set('scTerms', 'terms');
+  set('scFaq', 'faq');
+  set('scRefund', 'refund');
+  set('scCancel', 'cancel');
+  set('scContact', 'contact');
+  set('scFacebook', 'facebook');
+  set('scTelegram', 'telegram');
+  set('scYoutube', 'youtube');
+  set('scCopyright', 'copyright');
+  set('scTopNotice1', 'topNotice1');
+  set('scTopNotice2', 'topNotice2');
+  set('scTopNotice3', 'topNotice3');
+  set('scTopNotice4', 'topNotice4');
+}
+function saveSiteContentSection(section){
+  const map = {
+    hero: { heroTitle:'scHeroTitle', heroSub:'scHeroSub', milestone:'scMilestone' },
+    notices: { notice1:'scNotice1', notice2:'scNotice2', notice3:'scNotice3', notice4:'scNotice4' },
+    footer: { address:'scAddress', about:'scAbout', privacy:'scPrivacy', terms:'scTerms', faq:'scFaq', refund:'scRefund', cancel:'scCancel', contact:'scContact' },
+    social: { facebook:'scFacebook', telegram:'scTelegram', youtube:'scYoutube', copyright:'scCopyright' },
+    topWorker: { topNotice1:'scTopNotice1', topNotice2:'scTopNotice2', topNotice3:'scTopNotice3', topNotice4:'scTopNotice4' }
+  };
+  const fields = map[section];
+  if(!fields) return toast('Unknown section','err');
+  const c = Object.assign({}, SITE_CONTENT_DEFAULTS, getSiteContent() || {});
+  Object.keys(fields).forEach(k=>{
+    const el = document.getElementById(fields[k]);
+    if(el) c[k] = (el.value||'').trim();
+  });
+  _siteContentCache = c;
+  if(window.fbSaveSiteContent) window.fbSaveSiteContent(c).catch(console.error);
+  applySiteContent();
+  toast('Saved!');
+}
+function saveSiteContentField(key, inputId){
+  const el = document.getElementById(inputId);
+  if(!el) return toast('Field পাওয়া যায়নি','err');
+  const c = Object.assign({}, SITE_CONTENT_DEFAULTS, getSiteContent() || {});
+  c[key] = (el.value || '').trim();
+  _siteContentCache = c;
+  if(window.fbSaveSiteContent) window.fbSaveSiteContent(c).catch(console.error);
+  applySiteContent();
+  toast('Saved!');
 }
 function saveSiteContent(){
-  const c = {
-    heroTitle: document.getElementById('scHeroTitle')?.value?.trim()||'',
-    heroSub: document.getElementById('scHeroSub')?.value?.trim()||'',
-    milestone: document.getElementById('scMilestone')?.value?.trim()||'',
-    notice1: document.getElementById('scNotice1')?.value?.trim()||'',
-    notice2: document.getElementById('scNotice2')?.value?.trim()||'',
-    notice3: document.getElementById('scNotice3')?.value?.trim()||'',
-    notice4: document.getElementById('scNotice4')?.value?.trim()||'',
-    address: document.getElementById('scAddress')?.value?.trim()||'',
-    about: document.getElementById('scAbout')?.value?.trim()||'',
-    privacy: document.getElementById('scPrivacy')?.value?.trim()||'',
-    terms: document.getElementById('scTerms')?.value?.trim()||'',
-    faq: document.getElementById('scFaq')?.value?.trim()||'',
-    refund: document.getElementById('scRefund')?.value?.trim()||'',
-    cancel: document.getElementById('scCancel')?.value?.trim()||'',
-    contact: document.getElementById('scContact')?.value?.trim()||'',
-    facebook: document.getElementById('scFacebook')?.value?.trim()||'',
-    telegram: document.getElementById('scTelegram')?.value?.trim()||'',
-    youtube: document.getElementById('scYoutube')?.value?.trim()||'',
-    copyright: document.getElementById('scCopyright')?.value?.trim()||'',
-    topNotice1: document.getElementById('scTopNotice1')?.value?.trim()||'',
-    topNotice2: document.getElementById('scTopNotice2')?.value?.trim()||'',
-    topNotice3: document.getElementById('scTopNotice3')?.value?.trim()||'',
-    topNotice4: document.getElementById('scTopNotice4')?.value?.trim()||''
+  const fields = {
+    heroTitle:'scHeroTitle', heroSub:'scHeroSub', milestone:'scMilestone',
+    notice1:'scNotice1', notice2:'scNotice2', notice3:'scNotice3', notice4:'scNotice4',
+    address:'scAddress', about:'scAbout', privacy:'scPrivacy', terms:'scTerms',
+    faq:'scFaq', refund:'scRefund', cancel:'scCancel', contact:'scContact',
+    facebook:'scFacebook', telegram:'scTelegram', youtube:'scYoutube', copyright:'scCopyright',
+    topNotice1:'scTopNotice1', topNotice2:'scTopNotice2', topNotice3:'scTopNotice3', topNotice4:'scTopNotice4'
   };
-    _siteContentCache = c;
+  const c = Object.assign({}, SITE_CONTENT_DEFAULTS, getSiteContent() || {});
+  Object.keys(fields).forEach(k=>{
+    const el = document.getElementById(fields[k]);
+    if(el) c[k] = (el.value||'').trim();
+  });
+  _siteContentCache = c;
   if(window.fbSaveSiteContent) window.fbSaveSiteContent(c).catch(console.error);
   applySiteContent();
   toast('Site Content saved!');
@@ -4794,9 +4959,10 @@ async function renderAdminChat(){
       const badge = t.unread ? `<span class="bg-red-500 text-white text-[10px] font-bold px-1.5 py-0.5 rounded-full">${t.unread}</span>` : '';
       return `<button type="button" onclick="adminOpenThread('${String(t.key).replace(/'/g,"\\'")}')" class="w-full text-left border rounded-xl p-2.5 ${active}">
         <div class="flex justify-between items-center gap-1">
-          <span class="font-semibold text-sm text-slate-900 truncate">${t.name||t.key}</span>
+          <span class="font-semibold text-sm text-slate-900 truncate">${t.name||'User'}</span>
           ${badge}
         </div>
+        <p class="text-[10px] text-slate-500 font-mono truncate mt-0.5">ID: ${t.key}</p>
         <p class="text-[11px] text-slate-500 truncate mt-0.5">${(last && last.text) || ''}</p>
         <p class="text-[10px] text-slate-400 mt-0.5">${(last && last.time) || ''}</p>
       </button>`;
@@ -4804,6 +4970,7 @@ async function renderAdminChat(){
   }
 
   if(_adminActiveThread) adminOpenThread(_adminActiveThread, true);
+  loadAdminStats();
 }
 
 async function adminOpenThread(key, silent){
@@ -4818,17 +4985,35 @@ async function adminOpenThread(key, silent){
     return k === key;
   }).sort((a,b) => (a.ts||0) - (b.ts||0));
 
-  const name = (msgs.find(m => !m.fromAdmin)?.fromName) || key;
-  if(header) header.innerHTML = `<span class="font-bold">${name}</span> <span class="text-xs text-slate-400 font-normal">(${key})</span>`;
+  let name = (msgs.find(m => !m.fromAdmin)?.fromName) || '';
+  let uid = key || '';
+  try {
+    const u = users[key] || Object.values(users||{}).find(x => x.authUid === key || x.userId === key);
+    if(u){
+      if(u.name) name = u.name;
+      uid = u.authUid || u.userId || key;
+    }
+  } catch(e){}
+  if(!name) name = 'User';
+  if(header) header.innerHTML = `<div class="leading-tight">
+    <p class="font-bold text-slate-900">${name}</p>
+    <p class="text-[11px] text-slate-500 font-medium mt-0.5">User ID: <span class="font-mono text-slate-700 break-all">${uid}</span></p>
+  </div>`;
 
   if(box){
     if(!msgs.length) box.innerHTML = '<p class="text-slate-400 text-center text-sm py-8">No messages</p>';
     else box.innerHTML = msgs.map(m => {
       const mine = !!m.fromAdmin;
-      return `<div class="flex ${mine?'justify-end':''}">
+      const docId = m._docId || '';
+      const safeId = String(docId).replace(/'/g, "\\'");
+      return `<div class="flex ${mine?'justify-end':''} group">
         <div class="max-w-[85%] rounded-2xl px-3 py-2 text-sm ${mine?'bg-green-600 text-white rounded-tr-sm':'bg-white border border-slate-200 text-slate-800 rounded-tl-sm'}">
-          <p class="whitespace-pre-wrap">${(m.text||'').replace(/</g,'&lt;')}</p>
+          <p class="whitespace-pre-wrap" id="chatMsgText_${docId}">${(m.text||'').replace(/</g,'&lt;')}</p>
           <p class="text-[10px] ${mine?'text-green-100':'text-slate-400'} mt-1">${m.time||''}${m.edited?' (edited)':''}</p>
+          <div class="flex gap-2 mt-1.5 ${mine?'justify-end':''}">
+            <button type="button" onclick="adminEditChatMsg('${safeId}')" class="text-[10px] font-semibold ${mine?'text-green-100 hover:text-white':'text-blue-600 hover:underline'}">Edit</button>
+            <button type="button" onclick="adminDeleteChatMsg('${safeId}')" class="text-[10px] font-semibold ${mine?'text-red-200 hover:text-white':'text-red-500 hover:underline'}">Delete</button>
+          </div>
         </div>
       </div>`;
     }).join('');
@@ -4886,6 +5071,43 @@ async function adminReplyInThread(){
 }
 
 function adminSendChat(){ adminReplyInThread(); }
+
+async function adminEditChatMsg(docId){
+  if(!docId) return toast('Message ID নেই','err');
+  const msg = (_adminChatList||[]).find(m => m._docId === docId);
+  if(!msg) return toast('মেসেজ পাওয়া যায়নি','err');
+  const newText = prompt('মেসেজ এডিট করুন:', msg.text || '');
+  if(newText === null) return;
+  const trimmed = newText.trim();
+  if(!trimmed) return toast('খালি মেসেজ রাখা যাবে না','err');
+  try {
+    if(window.fbUpdateChat) await window.fbUpdateChat(docId, { text: trimmed, edited: true });
+    msg.text = trimmed;
+    msg.edited = true;
+    if(_adminActiveThread) adminOpenThread(_adminActiveThread, true);
+    toast('মেসেজ আপডেট হয়েছে');
+  } catch(e){
+    console.error(e);
+    toast('এডিট ব্যর্থ','err');
+  }
+}
+
+async function adminDeleteChatMsg(docId){
+  if(!docId) return toast('Message ID নেই','err');
+  if(!confirm('এই মেসেজ ডিলিট করবেন?')) return;
+  try {
+    if(window.fbDeleteChat) await window.fbDeleteChat(docId);
+    _adminChatList = (_adminChatList||[]).filter(m => m._docId !== docId);
+    _chatCache = (_chatCache||[]).filter(m => m._docId !== docId);
+    if(_adminActiveThread) adminOpenThread(_adminActiveThread, true);
+    else renderAdminChat();
+    loadAdminStats();
+    toast('মেসেজ ডিলিট হয়েছে');
+  } catch(e){
+    console.error(e);
+    toast('ডিলিট ব্যর্থ','err');
+  }
+}
 
 let _rewardCache = null;
 let _rewardClaimsCache = [];
@@ -5111,20 +5333,20 @@ function openSitePage(key){
 
   <div class="bg-white border-b border-slate-200 px-3 py-2 overflow-x-auto sticky top-[52px] z-40">
     <div class="flex gap-2 min-w-max">
-      <button data-admin="overview" onclick="adminGo('overview')" class="admin-nav-btn bg-green-600 text-white text-xs font-semibold px-4 py-2 rounded-xl whitespace-nowrap">Overview</button>
-      <button data-admin="users" onclick="adminGo('users')" class="admin-nav-btn bg-slate-100 text-slate-700 text-xs font-semibold px-4 py-2 rounded-xl whitespace-nowrap">Users</button>
-      <button data-admin="suspended" onclick="adminGo('suspended')" class="admin-nav-btn bg-slate-100 text-slate-700 text-xs font-semibold px-4 py-2 rounded-xl whitespace-nowrap">Suspended</button>
-      <button data-admin="deposits" onclick="adminGo('deposits')" class="admin-nav-btn bg-slate-100 text-slate-700 text-xs font-semibold px-4 py-2 rounded-xl whitespace-nowrap">Deposits</button>
-      <button data-admin="withdraws" onclick="adminGo('withdraws')" class="admin-nav-btn bg-slate-100 text-slate-700 text-xs font-semibold px-4 py-2 rounded-xl whitespace-nowrap">Withdraws</button>
-      <button data-admin="verifications" onclick="adminGo('verifications')" class="admin-nav-btn bg-slate-100 text-slate-700 text-xs font-semibold px-4 py-2 rounded-xl whitespace-nowrap">Verify</button>
-      <button data-admin="jobs" onclick="adminGo('jobs')" class="admin-nav-btn bg-slate-100 text-slate-700 text-xs font-semibold px-4 py-2 rounded-xl whitespace-nowrap">Jobs</button>
-      <button data-admin="reports" onclick="adminGo('reports')" class="admin-nav-btn bg-slate-100 text-slate-700 text-xs font-semibold px-4 py-2 rounded-xl whitespace-nowrap">Reports</button>
-      <button data-admin="ads" onclick="adminGo('ads')" class="admin-nav-btn bg-slate-100 text-slate-700 text-xs font-semibold px-4 py-2 rounded-xl whitespace-nowrap">Ads</button>
-      <button data-admin="chat" onclick="adminGo('chat')" class="admin-nav-btn bg-slate-100 text-slate-700 text-xs font-semibold px-4 py-2 rounded-xl whitespace-nowrap">Live Chat</button>
-      <button data-admin="notices" onclick="adminGo('notices')" class="admin-nav-btn bg-slate-100 text-slate-700 text-xs font-semibold px-4 py-2 rounded-xl whitespace-nowrap">Notices</button>
-      <button data-admin="rewards" onclick="adminGo('rewards')" class="admin-nav-btn bg-slate-100 text-slate-700 text-xs font-semibold px-4 py-2 rounded-xl whitespace-nowrap">Rewards</button>
-      <button data-admin="content" onclick="adminGo('content')" class="admin-nav-btn bg-slate-100 text-slate-700 text-xs font-semibold px-4 py-2 rounded-xl whitespace-nowrap">Site Content</button>
-      <button data-admin="settings" onclick="adminGo('settings')" class="admin-nav-btn bg-slate-100 text-slate-700 text-xs font-semibold px-4 py-2 rounded-xl whitespace-nowrap">Settings</button>
+      <button data-admin="overview" onclick="adminGo('overview')" class="admin-nav-btn relative bg-green-600 text-white text-xs font-semibold px-4 py-2 rounded-xl whitespace-nowrap">Overview</button>
+      <button data-admin="users" onclick="adminGo('users')" class="admin-nav-btn relative bg-slate-100 text-slate-700 text-xs font-semibold px-4 py-2 rounded-xl whitespace-nowrap">Users<span id="badge-users" class="hidden absolute -top-1 -right-1 w-2.5 h-2.5 bg-red-500 rounded-full ring-2 ring-white"></span></button>
+      <button data-admin="suspended" onclick="adminGo('suspended')" class="admin-nav-btn relative bg-slate-100 text-slate-700 text-xs font-semibold px-4 py-2 rounded-xl whitespace-nowrap">Suspended<span id="badge-suspended" class="hidden absolute -top-1 -right-1 w-2.5 h-2.5 bg-red-500 rounded-full ring-2 ring-white"></span></button>
+      <button data-admin="deposits" onclick="adminGo('deposits')" class="admin-nav-btn relative bg-slate-100 text-slate-700 text-xs font-semibold px-4 py-2 rounded-xl whitespace-nowrap">Deposits<span id="badge-deposits" class="hidden absolute -top-1 -right-1 w-2.5 h-2.5 bg-red-500 rounded-full ring-2 ring-white"></span></button>
+      <button data-admin="withdraws" onclick="adminGo('withdraws')" class="admin-nav-btn relative bg-slate-100 text-slate-700 text-xs font-semibold px-4 py-2 rounded-xl whitespace-nowrap">Withdraws<span id="badge-withdraws" class="hidden absolute -top-1 -right-1 w-2.5 h-2.5 bg-red-500 rounded-full ring-2 ring-white"></span></button>
+      <button data-admin="verifications" onclick="adminGo('verifications')" class="admin-nav-btn relative bg-slate-100 text-slate-700 text-xs font-semibold px-4 py-2 rounded-xl whitespace-nowrap">Verify<span id="badge-verifications" class="hidden absolute -top-1 -right-1 w-2.5 h-2.5 bg-red-500 rounded-full ring-2 ring-white"></span></button>
+      <button data-admin="jobs" onclick="adminGo('jobs')" class="admin-nav-btn relative bg-slate-100 text-slate-700 text-xs font-semibold px-4 py-2 rounded-xl whitespace-nowrap">Jobs<span id="badge-jobs" class="hidden absolute -top-1 -right-1 w-2.5 h-2.5 bg-red-500 rounded-full ring-2 ring-white"></span></button>
+      <button data-admin="reports" onclick="adminGo('reports')" class="admin-nav-btn relative bg-slate-100 text-slate-700 text-xs font-semibold px-4 py-2 rounded-xl whitespace-nowrap">Reports<span id="badge-reports" class="hidden absolute -top-1 -right-1 w-2.5 h-2.5 bg-red-500 rounded-full ring-2 ring-white"></span></button>
+      <button data-admin="ads" onclick="adminGo('ads')" class="admin-nav-btn relative bg-slate-100 text-slate-700 text-xs font-semibold px-4 py-2 rounded-xl whitespace-nowrap">Ads<span id="badge-ads" class="hidden absolute -top-1 -right-1 w-2.5 h-2.5 bg-red-500 rounded-full ring-2 ring-white"></span></button>
+      <button data-admin="chat" onclick="adminGo('chat')" class="admin-nav-btn relative bg-slate-100 text-slate-700 text-xs font-semibold px-4 py-2 rounded-xl whitespace-nowrap">Live Chat<span id="badge-chat" class="hidden absolute -top-1 -right-1 w-2.5 h-2.5 bg-red-500 rounded-full ring-2 ring-white"></span></button>
+      <button data-admin="notices" onclick="adminGo('notices')" class="admin-nav-btn relative bg-slate-100 text-slate-700 text-xs font-semibold px-4 py-2 rounded-xl whitespace-nowrap">Notices</button>
+      <button data-admin="rewards" onclick="adminGo('rewards')" class="admin-nav-btn relative bg-slate-100 text-slate-700 text-xs font-semibold px-4 py-2 rounded-xl whitespace-nowrap">Rewards<span id="badge-rewards" class="hidden absolute -top-1 -right-1 w-2.5 h-2.5 bg-red-500 rounded-full ring-2 ring-white"></span></button>
+      <button data-admin="content" onclick="adminGo('content')" class="admin-nav-btn relative bg-slate-100 text-slate-700 text-xs font-semibold px-4 py-2 rounded-xl whitespace-nowrap">Site Content</button>
+      <button data-admin="settings" onclick="adminGo('settings')" class="admin-nav-btn relative bg-slate-100 text-slate-700 text-xs font-semibold px-4 py-2 rounded-xl whitespace-nowrap">Settings</button>
 
     </div>
   </div>
@@ -5292,42 +5514,62 @@ function openSitePage(key){
 
     <div id="admin-content" class="hidden">
       <h2 class="font-bold text-lg text-slate-900 mb-3">Site Content & Links</h2>
-      <p class="text-xs text-slate-500 mb-3">হোম পেজ, ফুটার, সোশ্যাল লিংক এডিট করুন। সেভ করলে সাইটে দেখা যাবে।</p>
-      <div class="bg-white rounded-2xl border border-slate-200 p-5 shadow-sm space-y-3">
+      <p class="text-xs text-slate-500 mb-3">প্রতিটি অংশের নিচে Save — শুধু সেই অংশ আপডেট হবে। ফিল্ডে বর্তমান টেক্সট থাকবে, শুধু এডিট করে Save করুন।</p>
+
+      <!-- Home / Hero -->
+      <div class="bg-white rounded-2xl border border-slate-200 p-5 shadow-sm space-y-3 mb-4">
         <p class="text-xs font-bold text-green-700 uppercase">Home / Hero</p>
         <label class="block text-sm font-semibold">Hero Title</label>
-        <input type="text" id="scHeroTitle" class="input-f" placeholder="Best Microjob & Freelancing Site...">
+        <input type="text" id="scHeroTitle" class="input-f" value="Best Microjob &amp; Freelancing Site To Make Money Online">
         <label class="block text-sm font-semibold">Hero Subtitle</label>
-        <input type="text" id="scHeroSub" class="input-f" placeholder="Small Gigs. Big Results.">
+        <input type="text" id="scHeroSub" class="input-f" value="Small Gigs. Big Results.">
         <label class="block text-sm font-semibold">Milestone Text</label>
-        <input type="text" id="scMilestone" class="input-f" placeholder="1 LAKH USERS">
-        <p class="text-xs font-bold text-green-700 uppercase pt-2">Live Notice (Dashboard Ticker)</p>
+        <input type="text" id="scMilestone" class="input-f" value="1 LAKH USERS">
+        <button type="button" onclick="saveSiteContentSection('hero')" class="w-full bg-green-600 hover:bg-green-700 text-white font-bold py-2.5 rounded-xl mt-1">Save Home / Hero</button>
+      </div>
+
+      <!-- Live Notice -->
+      <div class="bg-white rounded-2xl border border-slate-200 p-5 shadow-sm space-y-3 mb-4">
+        <p class="text-xs font-bold text-green-700 uppercase">Live Notice (Dashboard Ticker)</p>
         <label class="block text-sm font-semibold">Notice Line 1</label>
-        <input type="text" id="scNotice1" class="input-f" placeholder="নতুন ইউজারদের জন্য বোনাস...">
+        <input type="text" id="scNotice1" class="input-f" value="🎉 নতুন ইউজারদের জন্য ৳৫০ বোনাস চালু!">
         <label class="block text-sm font-semibold">Notice Line 2</label>
-        <input type="text" id="scNotice2" class="input-f" placeholder="bKash/Nagad এ ২৪ ঘন্টার মধ্যে উইথড্র">
+        <input type="text" id="scNotice2" class="input-f" value="⚡ bKash/Nagad এ ২৪ ঘন্টার মধ্যে উইথড্র">
         <label class="block text-sm font-semibold">Notice Line 3</label>
-        <input type="text" id="scNotice3" class="input-f" placeholder="টপ জব: YouTube Watch">
+        <input type="text" id="scNotice3" class="input-f" value="🔥 টপ জব: YouTube Watch ৳৩.৫০">
         <label class="block text-sm font-semibold">Notice Line 4</label>
-        <input type="text" id="scNotice4" class="input-f" placeholder="রেফারেল করে কমিশন নিন">
-        <p class="text-xs font-bold text-green-700 uppercase pt-2">Footer / Company Pages</p>
+        <input type="text" id="scNotice4" class="input-f" value="📢 রেফারেল করে ৫% কমিশন নিন">
+        <button type="button" onclick="saveSiteContentSection('notices')" class="w-full bg-green-600 hover:bg-green-700 text-white font-bold py-2.5 rounded-xl mt-1">Save Live Notice</button>
+      </div>
+
+      <!-- Footer / Company Pages -->
+      <div class="bg-white rounded-2xl border border-slate-200 p-5 shadow-sm space-y-3 mb-4">
+        <p class="text-xs font-bold text-green-700 uppercase">Footer / Company Pages</p>
         <label class="block text-sm font-semibold">Address</label>
-        <textarea id="scAddress" class="input-f h-16 resize-none" placeholder="House 12, Road 5..."></textarea>
+        <textarea id="scAddress" class="input-f h-16 resize-none">House 12, Road 5, Dhanmondi,
+Dhaka-1205, Bangladesh</textarea>
         <label class="block text-sm font-semibold">About Us</label>
-        <textarea id="scAbout" class="input-f h-20 resize-none" placeholder="About Us content..."></textarea>
+        <textarea id="scAbout" class="input-f h-20 resize-none">SolixPay is the best microjob and freelancing platform to make money online. Small gigs, big results.</textarea>
         <label class="block text-sm font-semibold">Privacy Policy</label>
-        <textarea id="scPrivacy" class="input-f h-20 resize-none" placeholder="Privacy Policy..."></textarea>
-        <label class="block text-sm font-semibold">Terms & Conditions</label>
-        <textarea id="scTerms" class="input-f h-20 resize-none" placeholder="Terms..."></textarea>
+        <textarea id="scPrivacy" class="input-f h-20 resize-none">Your privacy is important to us. We collect and use personal information only as needed to operate SolixPay services.</textarea>
+        <label class="block text-sm font-semibold">Terms &amp; Conditions</label>
+        <textarea id="scTerms" class="input-f h-20 resize-none">By using SolixPay you agree to our terms. Accounts must use accurate information. Fraud or abuse may result in suspension.</textarea>
         <label class="block text-sm font-semibold">FAQ</label>
-        <textarea id="scFaq" class="input-f h-20 resize-none" placeholder="FAQ..."></textarea>
+        <textarea id="scFaq" class="input-f h-20 resize-none">Q: How do I withdraw?
+A: Go to Wallet, select bKash/Nagad, enter amount (min ৳500). Processed within 24 hours.</textarea>
         <label class="block text-sm font-semibold">Refund Policy</label>
-        <textarea id="scRefund" class="input-f h-16 resize-none" placeholder="Refund Policy..."></textarea>
+        <textarea id="scRefund" class="input-f h-16 resize-none">Deposit refunds are handled case-by-case by admin. Contact support with transaction details.</textarea>
         <label class="block text-sm font-semibold">Cancellation Policy</label>
-        <textarea id="scCancel" class="input-f h-16 resize-none" placeholder="Cancellation Policy..."></textarea>
+        <textarea id="scCancel" class="input-f h-16 resize-none">Job posts and ads may be cancelled before approval. After activation, cancellation is subject to admin review.</textarea>
         <label class="block text-sm font-semibold">Contact Us</label>
-        <textarea id="scContact" class="input-f h-16 resize-none" placeholder="Contact info..."></textarea>
-        <p class="text-xs font-bold text-green-700 uppercase pt-2">Social Links</p>
+        <textarea id="scContact" class="input-f h-16 resize-none">House 12, Road 5, Dhanmondi, Dhaka-1205, Bangladesh
+Support: Live Chat inside the app</textarea>
+        <button type="button" onclick="saveSiteContentSection('footer')" class="w-full bg-green-600 hover:bg-green-700 text-white font-bold py-2.5 rounded-xl mt-1">Save Footer / Company</button>
+      </div>
+
+      <!-- Social Links -->
+      <div class="bg-white rounded-2xl border border-slate-200 p-5 shadow-sm space-y-3 mb-4">
+        <p class="text-xs font-bold text-green-700 uppercase">Social Links</p>
         <label class="block text-sm font-semibold">Facebook Page URL</label>
         <input type="url" id="scFacebook" class="input-f" placeholder="https://facebook.com/...">
         <label class="block text-sm font-semibold">Telegram Channel/Group URL</label>
@@ -5335,17 +5577,22 @@ function openSitePage(key){
         <label class="block text-sm font-semibold">YouTube Channel URL</label>
         <input type="url" id="scYoutube" class="input-f" placeholder="https://youtube.com/...">
         <label class="block text-sm font-semibold">Footer Copyright</label>
-        <input type="text" id="scCopyright" class="input-f" placeholder="© 2026 SOLIXPAY All Rights Reserved.">
-        <p class="text-xs font-bold text-green-700 uppercase pt-2">Top Worker Live Notice (Ticker)</p>
+        <input type="text" id="scCopyright" class="input-f" value="© 2026 SOLIXPAY All Rights Reserved.">
+        <button type="button" onclick="saveSiteContentSection('social')" class="w-full bg-green-600 hover:bg-green-700 text-white font-bold py-2.5 rounded-xl mt-1">Save Social Links</button>
+      </div>
+
+      <!-- Top Worker Ticker -->
+      <div class="bg-white rounded-2xl border border-slate-200 p-5 shadow-sm space-y-3 mb-4">
+        <p class="text-xs font-bold text-green-700 uppercase">Top Worker Live Notice (Ticker)</p>
         <label class="block text-sm font-semibold">Ticker Line 1</label>
-        <input type="text" id="scTopNotice1" class="input-f" placeholder="🎉 আজকের Top Worker লিস্ট লাইভ!">
+        <input type="text" id="scTopNotice1" class="input-f" value="🎉 আজকের Top Worker লিস্ট লাইভ!">
         <label class="block text-sm font-semibold">Ticker Line 2</label>
-        <input type="text" id="scTopNotice2" class="input-f" placeholder="⏰ প্রতিদিন রাত ১২টায় লিস্ট আপডেট হয়">
+        <input type="text" id="scTopNotice2" class="input-f" value="⏰ প্রতিদিন রাত ১২টায় লিস্ট আপডেট হয়">
         <label class="block text-sm font-semibold">Ticker Line 3</label>
-        <input type="text" id="scTopNotice3" class="input-f" placeholder="🔥 সবচেয়ে বেশি কাজ করে Top-এ উঠুন">
+        <input type="text" id="scTopNotice3" class="input-f" value="🔥 সবচেয়ে বেশি কাজ করে Top-এ উঠুন">
         <label class="block text-sm font-semibold">Ticker Line 4</label>
-        <input type="text" id="scTopNotice4" class="input-f" placeholder="🏆 সন্তুষ্ট/অ্যাপ্রুভড টাস্ক অনুযায়ী র‍্যাঙ্ক">
-        <button onclick="saveSiteContent()" class="w-full bg-green-600 hover:bg-green-700 text-white font-bold py-3 rounded-xl mt-2">Save All Content</button>
+        <input type="text" id="scTopNotice4" class="input-f" value="🏆 সন্তুষ্ট/অ্যাপ্রুভড টাস্ক অনুযায়ী র‍্যাঙ্ক">
+        <button type="button" onclick="saveSiteContentSection('topWorker')" class="w-full bg-green-600 hover:bg-green-700 text-white font-bold py-2.5 rounded-xl mt-1">Save Top Worker Notice</button>
       </div>
     </div>
 
