@@ -1390,8 +1390,6 @@ body.dark-theme .side-item:hover,body.dark-theme .side-item.active{background:#0
     </div>
     <div class="bg-white rounded-2xl border border-slate-200 p-4 text-xs text-red-500 space-y-1.5 leading-relaxed font-medium">
       <p>• Jobs in the YouTube category must be exclusive to our platform. Posting them on other platforms at the same time may lead to rejection and account ban.</p>
-      <p>• Job শুধু পোস্ট করার সময় যে দিন সেট করা হবে, তত দিন পর্যন্ত চলবে। Extend করা যাবে না।</p>
-      <p>• মেয়াদ শেষের আগে (৩ দিন ও ১ দিন আগে) Buyer নোটিফিকেশন পাবেন। মেয়াদ শেষ হলে জব Auto-Expired হবে।</p>
       <p>• Jobs marked as Completed for over 60 days will be automatically deleted, including all proofs and related data.</p>
       <p>• Any Top Job that is not updated within 7 days will be removed from the Top Job section.</p>
     </div>
@@ -2559,7 +2557,19 @@ function updateUI(){
 
   // --- Total Job (Buyer: from posted jobs + deposits) ---
   const postedJobs = currentUser.postedJobs || [];
-  const jobsPostedCount = postedJobs.length;
+  // Lifetime counters — Delete করলেও Profile থেকে হিসাব যাবে না
+  const jobsPostedCount = Math.max(
+    Number(currentUser.lifetimeJobsPosted) || 0,
+    postedJobs.length
+  );
+  const currentOver = postedJobs.filter(j => {
+    const st = String(j.status||'').toLowerCase();
+    return st === 'completed' || st === 'done' || st === 'over' || st === 'expired';
+  }).length;
+  const jobOverCount = Math.max(
+    Number(currentUser.lifetimeJobOver) || 0,
+    currentOver
+  );
 
   // Lifetime Total Deposit
   const depList = currentUser.deposits || [];
@@ -2569,8 +2579,7 @@ function updateUI(){
       .filter(d => ['Accepted','Approved','Confirmed','Success'].includes(String(d.status||'')))
       .reduce((s,d) => s + (parseFloat(d.amount)||0), 0);
   }
-  // Fallback: remaining balance + net money spent on job posts
-  // Net spent per job = cost - refunded (unused slots returned on Complete/Expire)
+  // Net spent = cost - refunded; also keep lifetimePaidJobs so delete doesn't erase Paid history
   const netSpentOnJobs = postedJobs.reduce((s,j) => {
     const cost = parseFloat(j.cost) || 0;
     const refunded = parseFloat(j.refunded) || 0;
@@ -2581,14 +2590,8 @@ function updateUI(){
     totalDepLifetime = (Number(currentUser.deposited)||0) + spentOnJobs;
   }
 
-  // Paid = net money actually spent on jobs (refunds subtracted)
-  const paidJobs = netSpentOnJobs;
-
-  // Job Over = completed jobs
-  const jobOverCount = postedJobs.filter(j => {
-    const st = String(j.status||'').toLowerCase();
-    return st === 'completed' || st === 'done' || st === 'over';
-  }).length;
+  // Paid = max(lifetime net paid, current net) so delete doesn't wipe paid history
+  const paidJobs = Math.max(Number(currentUser.lifetimePaidJobs) || 0, netSpentOnJobs);
 
   setTxt('stJobsPosted', jobsPostedCount);
   setTxt('stTotalDep', '৳ ' + Math.round(totalDepLifetime));
@@ -3339,6 +3342,19 @@ async function finalizeBuyerJob(job, newStatus){
   job.status = newStatus;
   job._finalized = true;
   job.endedAt = Date.now();
+
+  // Lifetime Job Over — Delete করলেও Profile হিসাব থাকবে
+  if(!job._countedOver){
+    job._countedOver = true;
+    if(currentUser){
+      currentUser.lifetimeJobOver = (Number(currentUser.lifetimeJobOver)||0) + 1;
+      // Refund already added to deposited; subtract from lifetime Paid
+      const rf = Number(job.refunded)||0;
+      if(rf > 0){
+        currentUser.lifetimePaidJobs = Math.max((Number(currentUser.lifetimePaidJobs)||0) - rf, 0);
+      }
+    }
+  }
 
   await syncJobPublicStatus(job);
   // Keep in JOBS with non-Active status so filter hides it
@@ -4185,6 +4201,8 @@ async function submitPostJob(){
 
   currentUser.deposited = bal - total;
   currentUser.postedJobs = currentUser.postedJobs || [];
+  currentUser.lifetimeJobsPosted = (Number(currentUser.lifetimeJobsPosted)||0) + 1;
+  currentUser.lifetimePaidJobs = (Number(currentUser.lifetimePaidJobs)||0) + total;
   const jobId = Date.now() % 1000000;
   const createdAt = Date.now();
   const expiresAt = createdAt + (estDays * 24 * 60 * 60 * 1000);
