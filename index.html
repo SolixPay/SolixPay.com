@@ -2433,6 +2433,7 @@ function initDash(){
   cleanMyOldData().catch(()=>{});
   // Auto-approve pending submissions older than 3 days (for buyers)
   checkAutoApproveSubmissions().catch(()=>{});
+  if(typeof checkExpiredJobs==='function') checkExpiredJobs().catch(()=>{});
   // Restore last page, or default by mode
   let lastView = null;
   try { lastView = window._lastView || null; } catch(e){}
@@ -2472,7 +2473,7 @@ function updateUI(){
   if(!currentUser)return;
   const nameEl=document.getElementById('userNameShow');
   if(nameEl) nameEl.textContent=currentUser.name || 'User';
-  document.getElementById('helloTxt').textContent='HELLO, '+currentUser.name.toUpperCase();
+  const helloEl=document.getElementById('helloTxt'); if(helloEl) helloEl.textContent='HELLO, '+(currentUser.name||'User').toUpperCase();
   const initial = (currentUser.name||'U').charAt(0).toUpperCase();
   const photoUrl = currentUser.photoUrl || '';
   function setAvatarEl(el, sizeClass){
@@ -2519,50 +2520,122 @@ function updateUI(){
   const modeEl=document.getElementById('pModeLabel');
   if(modeEl) modeEl.textContent = currentUser.mode || 'Worker';
 
-  // Stats from tasks
+  // ========== PROFILE STATS (REAL DATA) ==========
+  const setTxt = (id,v)=>{ const e=document.getElementById(id); if(e) e.textContent=v; };
+
+  // --- Total Working (Worker: from my submitted tasks) ---
   const tasks = currentUser.tasks || [];
   const attend = tasks.length;
-  const satisfied = tasks.filter(t=>t.status==='Approved').length;
-  const rejected = tasks.filter(t=>t.status==='Rejected').length;
-  const pending = tasks.filter(t=>t.status==='Pending').length;
-  const setTxt = (id,v)=>{ const e=document.getElementById(id); if(e) e.textContent=v; };
+  const satisfied = tasks.filter(t => (t.status||'') === 'Approved').length;
+  const rejected = tasks.filter(t => (t.status||'') === 'Rejected').length;
+  const pending = tasks.filter(t => {
+    const s = t.status||'Pending';
+    return s === 'Pending' || s === 'In Review' || s === 'Submitted';
+  }).length;
   setTxt('stAttend', attend);
   setTxt('stSatisfied', satisfied);
   setTxt('stRejected', rejected);
   setTxt('stPending', pending);
-  // Payment Received = only accepted withdraws total
+
+  // Payment Received = approved withdraws only
   const withdraws = currentUser.withdraws || [];
-  const paidOut = withdraws.reduce((s,w)=>s+(parseFloat(w.amount)||0),0);
-  setTxt('stPayment', '৳ '+paidOut.toFixed(2));
-  setTxt('stLastTask', tasks[0] ? (tasks[0].time||'—').split(',')[0] : '—');
-  setTxt('stJobsPosted', 0);
-  setTxt('stTotalDep', '৳ '+(currentUser.deposited||0).toFixed(0));
-  setTxt('stPaid', '৳ '+paidOut.toFixed(0));
-  setTxt('stJobOver', 0);
+  const paidOut = withdraws
+    .filter(w => ['Accepted','Approved','Confirmed','Paid'].includes(String(w.status||'')))
+    .reduce((s,w) => s + (parseFloat(w.amount)||0), 0);
+  setTxt('stPayment', '৳ ' + paidOut.toFixed(2));
+
+  // Last Task date
+  let lastTaskStr = '—';
+  if(tasks.length){
+    const sorted = tasks.slice().sort((a,b) => (b.ts||0) - (a.ts||0));
+    const lt = sorted[0];
+    lastTaskStr = lt.time ? String(lt.time).split(',')[0] : (lt.ts ? new Date(lt.ts).toLocaleDateString() : '—');
+  }
+  setTxt('stLastTask', lastTaskStr);
   setTxt('pReviews', satisfied + ' Reviews (0)');
 
-  // Working Status chart
-  const total = attend || 1;
-  const pct = Math.round((satisfied/total)*100);
-  const chart = document.getElementById('chartSatisfied');
-  if(chart) chart.setAttribute('stroke-dasharray', pct + ' 100');
-  const chartLabel = document.getElementById('chartLabel');
-  if(chartLabel) chartLabel.textContent = pct + '%';
+  // --- Total Job (Buyer: from posted jobs + deposits) ---
+  const postedJobs = currentUser.postedJobs || [];
+  const jobsPostedCount = postedJobs.length;
 
-  // Job Status chart (based on jobs posted – currently 0 so mostly Not Rated)
-  const jobsPosted = 0;
-  const jobSatisfied = 0;
-  const jobNotSatisfied = 0;
-  const jobNotRated = Math.max(jobsPosted, 1);
-  const jobTotal = jobSatisfied + jobNotSatisfied + jobNotRated;
-  const jobSatPct = Math.round((jobSatisfied/jobTotal)*100);
-  const jobRatePct = Math.round((jobNotRated/jobTotal)*100);
+  // Lifetime Total Deposit
+  const depList = currentUser.deposits || [];
+  let totalDepLifetime = Number(currentUser.totalDeposited) || 0;
+  if(!totalDepLifetime){
+    totalDepLifetime = depList
+      .filter(d => ['Accepted','Approved','Confirmed','Success'].includes(String(d.status||'')))
+      .reduce((s,d) => s + (parseFloat(d.amount)||0), 0);
+  }
+  // Fallback: remaining balance + money spent on job posts
+  const spentOnJobs = postedJobs.reduce((s,j) => s + (parseFloat(j.cost)||0), 0);
+  if(!totalDepLifetime){
+    totalDepLifetime = (Number(currentUser.deposited)||0) + spentOnJobs;
+  }
+
+  // Paid = money used to post jobs
+  const paidJobs = spentOnJobs;
+
+  // Job Over = completed jobs
+  const jobOverCount = postedJobs.filter(j => {
+    const st = String(j.status||'').toLowerCase();
+    return st === 'completed' || st === 'done' || st === 'over';
+  }).length;
+
+  setTxt('stJobsPosted', jobsPostedCount);
+  setTxt('stTotalDep', '৳ ' + Math.round(totalDepLifetime));
+  setTxt('stPaid', '৳ ' + Math.round(paidJobs));
+  setTxt('stJobOver', jobOverCount);
+
+  // --- Working Status chart (worker tasks) ---
+  // Satisfied % of attended tasks
+  const workPct = attend > 0 ? Math.round((satisfied / attend) * 100) : 0;
+  const chart = document.getElementById('chartSatisfied');
+  if(chart){
+    // circumference ~ 97.4 for r=15.5 → use 100 unit dasharray style already in HTML
+    chart.setAttribute('stroke-dasharray', workPct + ' 100');
+    chart.setAttribute('stroke', workPct > 0 ? '#34d399' : '#e2e8f0');
+  }
+  const chartLabel = document.getElementById('chartLabel');
+  if(chartLabel) chartLabel.textContent = attend === 0 ? '0%' : (workPct + '%');
+
+  // --- Job Status chart (buyer posted jobs) ---
+  // Per job: Satisfied if any Approved sub; Not Satisfied if any Rejected and no Approved; else Not Rated
+  let jobSatisfied = 0, jobNotSatisfied = 0, jobNotRated = 0;
+  postedJobs.forEach(j => {
+    const subs = j.submissions || [];
+    if(!subs.length){
+      jobNotRated++;
+      return;
+    }
+    const hasApproved = subs.some(s => s.status === 'Approved');
+    const hasRejected = subs.some(s => s.status === 'Rejected');
+    const hasPending = subs.some(s => s.status === 'Pending' || !s.status);
+    if(hasApproved) jobSatisfied++;
+    else if(hasRejected && !hasPending) jobNotSatisfied++;
+    else jobNotRated++;
+  });
+  const jTotal = Math.max(jobSatisfied + jobNotSatisfied + jobNotRated, 1);
+  const jobSatPct = jobsPostedCount ? Math.round((jobSatisfied / jTotal) * 100) : 0;
+  const jobNSPct = jobsPostedCount ? Math.round((jobNotSatisfied / jTotal) * 100) : 0;
+  const jobNRPct = jobsPostedCount ? Math.round((jobNotRated / jTotal) * 100) : 100;
+
   const chartJobSat = document.getElementById('chartJobSatisfied');
   const chartJobNR = document.getElementById('chartJobNotRated');
-  if(chartJobSat) chartJobSat.setAttribute('stroke-dasharray', jobSatPct + ' 100');
-  if(chartJobNR) chartJobNR.setAttribute('stroke-dasharray', jobRatePct + ' 100');
+  // Layer: green = satisfied, gray = not rated portion (simple 2-ring visual)
+  if(chartJobSat){
+    chartJobSat.setAttribute('stroke-dasharray', jobSatPct + ' 100');
+    chartJobSat.setAttribute('stroke', jobSatPct > 0 ? '#34d399' : '#e2e8f0');
+  }
+  if(chartJobNR){
+    // show remaining as not rated ring
+    const remain = jobsPostedCount ? Math.max(100 - jobSatPct, 0) : 100;
+    chartJobNR.setAttribute('stroke-dasharray', remain + ' 100');
+    chartJobNR.setAttribute('stroke-dashoffset', String(-jobSatPct));
+  }
   const chartJobLabel = document.getElementById('chartJobLabel');
-  if(chartJobLabel) chartJobLabel.textContent = jobsPosted === 0 ? 'No Jobs' : jobSatPct + '%';
+  if(chartJobLabel){
+    chartJobLabel.textContent = jobsPostedCount === 0 ? 'No Jobs' : (jobSatPct + '%');
+  }
 
   // Login history
   const histList = document.getElementById('loginHistoryList');
@@ -2597,7 +2670,7 @@ function goView(v){
 
   if(v==='jobs')renderJobs();
   if(v==='mywork')renderMyWork();
-  if(v==='myjobs')renderMyJobs();
+  if(v==='myjobs'){ if(typeof checkExpiredJobs==='function') checkExpiredJobs().catch(()=>{}); renderMyJobs(); }
   if(v==='notify'){ markNotifySeen(); renderNotifyList(); }
   if(v==='history')showHist('withdraw');
   if(v==='profile' || v==='manage') updateUI();
@@ -2672,7 +2745,9 @@ function saveProfileInfo(){
 
 function saveSecCode(){
   if(!currentUser) return;
-  const code = document.getElementById('mSecCode').value.trim();
+  const el = document.getElementById('mSecCode');
+  if(!el) return toast('Security code field নেই','err');
+  const code = (el.value||'').trim();
   if(code.length < 4) return toast('Security code কমপক্ষে ৪ অক্ষর','err');
   currentUser.secCode = code;
   save();
@@ -2755,6 +2830,11 @@ function checkAndUnlockByEarning(){
 
 function getFilteredJobs(){
   let list = [...JOBS];
+  // Only Active jobs visible to workers (Paused / Completed / Expired hidden)
+  list = list.filter(j => {
+    const st = (j.status || 'Active');
+    return st === 'Active';
+  });
   // Locked users: only Gmail Account + Telegram
   if(currentUser && !isJobsUnlocked(currentUser)){
     list = list.filter(j => STARTER_CATEGORIES.some(c => (j.category||'').toLowerCase().includes(c.toLowerCase()) || c.toLowerCase().includes((j.category||'').toLowerCase())));
@@ -2814,8 +2894,9 @@ function renderJobs(){
 
 function openJobDetail(id){
   if(currentUser && (currentUser.mode||'Worker')==='Buyer'){ return toast('Buyer mode-এ কাজ করা যায় না। Worker mode-এ যান।','err'); }
-  const j = JOBS.find(x => x.id === id) || JOBS.find((x,i)=>(x.id||(1000+i))===id);
+  const j = JOBS.find(x => x.id === id || String(x.id)===String(id)) || JOBS.find((x,i)=>(x.id||(1000+i))===id);
   if(!j) return;
+  if((j.status||'Active') !== 'Active') return toast('এই জব এখন উপলব্ধ নেই','err');
   // Locked users cannot open non-starter jobs
   if(currentUser && !isJobsUnlocked(currentUser)){
     const cat = (j.category||'').toLowerCase();
@@ -3124,39 +3205,197 @@ function renderMyJobs(){
     const total = j.workers || j.total || 0;
     const cost = (j.cost != null) ? Number(j.cost).toFixed(2) : '—';
     const status = j.status || 'Active';
-    const stClass = status === 'Active' ? 'text-green-600' : status === 'Completed' ? 'text-slate-500' : 'text-amber-600';
+    const stClass = status === 'Active' ? 'text-green-600' : (status === 'Completed' || status === 'Expired') ? 'text-slate-500' : 'text-amber-600';
     const pendingCount = (j.submissions||[]).filter(s => s.status==='Pending').length;
+    const ended = status === 'Completed' || status === 'Expired';
+    const pauseLabel = status === 'Paused' ? 'Resume' : 'Pause';
+    const actions = ended ? `
+        <button onclick="openJobReviews(${i})" class="text-[10px] bg-blue-100 hover:bg-blue-200 text-blue-700 font-semibold px-2 py-1 rounded-lg relative">
+          Review${pendingCount?` <span class="bg-red-500 text-white rounded-full px-1.5">${pendingCount}</span>`:''}
+        </button>` : `
+        <button onclick="openJobReviews(${i})" class="text-[10px] bg-blue-100 hover:bg-blue-200 text-blue-700 font-semibold px-2 py-1 rounded-lg relative">
+          Review${pendingCount?` <span class="bg-red-500 text-white rounded-full px-1.5">${pendingCount}</span>`:''}
+        </button>
+        <button onclick="pauseMyJob(${i})" class="text-[10px] bg-slate-100 hover:bg-slate-200 text-slate-700 font-semibold px-2 py-1 rounded-lg">${pauseLabel}</button>
+        <button onclick="extendMyJob(${i})" class="text-[10px] bg-indigo-100 hover:bg-indigo-200 text-indigo-700 font-semibold px-2 py-1 rounded-lg">Extend</button>
+        <button onclick="completeMyJob(${i})" class="text-[10px] bg-green-100 hover:bg-green-200 text-green-700 font-semibold px-2 py-1 rounded-lg">Done</button>`;
     return `<tr>
       <td class="p-3 font-semibold text-slate-700">#${id}</td>
       <td class="p-3 font-bold text-slate-900 max-w-[120px] truncate">${j.title || '—'}</td>
       <td class="p-3">${done}/${total}</td>
       <td class="p-3 font-semibold text-green-600">৳${cost}</td>
       <td class="p-3 font-bold ${stClass}">${status}</td>
-      <td class="p-3 space-y-1">
-        <button onclick="openJobReviews(${i})" class="text-[10px] bg-blue-100 hover:bg-blue-200 text-blue-700 font-semibold px-2 py-1 rounded-lg relative">
-          Review${pendingCount?` <span class="bg-red-500 text-white rounded-full px-1.5">${pendingCount}</span>`:''}
-        </button>
-        <button onclick="pauseMyJob(${i})" class="text-[10px] bg-slate-100 hover:bg-slate-200 text-slate-700 font-semibold px-2 py-1 rounded-lg">Pause</button>
-        <button onclick="completeMyJob(${i})" class="text-[10px] bg-green-100 hover:bg-green-200 text-green-700 font-semibold px-2 py-1 rounded-lg">Done</button>
+      <td class="p-3 space-y-1">${actions}
       </td>
     </tr>`;
   }).join('');
 }
+function findPublicJob(job){
+  if(!job) return null;
+  return JOBS.find(x => x.id === job.id || String(x.id) === String(job.id)) || null;
+}
+
+async function syncJobPublicStatus(job){
+  const pub = findPublicJob(job);
+  if(pub){
+    pub.status = job.status || 'Active';
+    pub.done = job.done || 0;
+    if(job.expiresAt) pub.expiresAt = job.expiresAt;
+    if(job.estDays != null) pub.estDays = job.estDays;
+    try {
+      if(pub._docId && window.fbUpdateJob){
+        await window.fbUpdateJob(pub._docId, {
+          status: pub.status,
+          done: pub.done,
+          expiresAt: pub.expiresAt || null,
+          estDays: pub.estDays || null
+        });
+      }
+    } catch(e){ console.error(e); }
+  }
+  // If not active, remove from worker list visibility is handled by filter;
+  // also drop from in-memory JOBS optional keep with status
+}
+
+/** Credit one pending submission to worker */
+async function creditPendingSubmission(job, sub){
+  if(!sub || sub.status !== 'Pending') return false;
+  sub.status = 'Approved';
+  sub.autoApproved = true;
+  let worker = users[sub.workerId] || Object.values(users||{}).find(x => x.authUid===sub.workerId || x.userId===sub.workerId);
+  if(!worker && window.fbLoadUser){
+    try { worker = await window.fbLoadUser(sub.workerId); } catch(e){}
+  }
+  if(worker){
+    worker.earned = (worker.earned||0) + (sub.earned||0);
+    worker.totalEarned = (worker.totalEarned||0) + (sub.earned||0);
+    worker.tasks = worker.tasks || [];
+    const task = worker.tasks.find(t => t.id === sub.id);
+    if(task) task.status = 'Approved';
+    if(!worker.jobsUnlocked && (worker.totalEarned||0) >= (window._unlockNeed || 500)){
+      worker.jobsUnlocked = true;
+    }
+    if(worker.userId) users[worker.userId] = worker;
+    if(worker.authUid) users[worker.authUid] = worker;
+    if(window.fbSaveUser && worker.authUid) {
+      try { await window.fbSaveUser(worker); } catch(e){}
+    }
+  }
+  return true;
+}
+
+/** End job: approve pending, refund unused slots, set status */
+async function finalizeBuyerJob(job, newStatus){
+  if(!job) return;
+  if(['Completed','Expired'].includes(job.status) && job._finalized) return;
+
+  // 1) Auto-approve all pending submissions
+  job.submissions = job.submissions || [];
+  for(const sub of job.submissions){
+    if(sub.status === 'Pending'){
+      const ok = await creditPendingSubmission(job, sub);
+      if(ok) job.done = Math.min((job.done||0)+1, job.total||job.workers||9999);
+    }
+  }
+
+  // 2) Refund unused worker slots (including platform fee portion)
+  const workers = Number(job.workers || job.total || 0);
+  const earn = Number(job.earn || job.price || 0);
+  const done = Number(job.done || 0);
+  const remaining = Math.max(workers - done, 0);
+  if(remaining > 0 && earn > 0){
+    const refund = remaining * earn * 1.05; // base + 5% fee
+    currentUser.deposited = (currentUser.deposited||0) + refund;
+    job.refunded = (job.refunded||0) + refund;
+  }
+
+  job.status = newStatus;
+  job._finalized = true;
+  job.endedAt = Date.now();
+
+  await syncJobPublicStatus(job);
+  // Keep in JOBS with non-Active status so filter hides it
+  const pub = findPublicJob(job);
+  if(pub) pub.status = newStatus;
+}
+
 function pauseMyJob(i){
   if(!currentUser || !currentUser.postedJobs || !currentUser.postedJobs[i]) return;
   const j = currentUser.postedJobs[i];
-  j.status = j.status === 'Paused' ? 'Active' : 'Paused';
-  // Sync public JOBS status if needed
-  const pub = JOBS.find(x => x.id === j.id);
-  if(pub) pub.status = j.status;
-  save(); renderMyJobs();
-  toast(j.status === 'Paused' ? 'Job paused' : 'Job resumed');
+  if(j.status === 'Completed' || j.status === 'Expired') return toast('এই জব শেষ','err');
+  const willPause = j.status !== 'Paused';
+  const msg = willPause ? 'এই জব Pause করবেন?' : 'এই জব Resume করবেন?';
+  adminConfirm(msg, () => {
+    j.status = willPause ? 'Paused' : 'Active';
+    syncJobPublicStatus(j).then(()=>{
+      save();
+      renderMyJobs();
+      if(typeof renderJobs === 'function') renderJobs();
+      toast(j.status === 'Paused' ? 'Job paused' : 'Job resumed');
+    });
+  });
 }
+
 function completeMyJob(i){
   if(!currentUser || !currentUser.postedJobs || !currentUser.postedJobs[i]) return;
-  currentUser.postedJobs[i].status = 'Completed';
-  save(); renderMyJobs();
-  toast('Job marked Completed');
+  const j = currentUser.postedJobs[i];
+  if(j.status === 'Completed' || j.status === 'Expired') return toast('ইতিমধ্যে শেষ','err');
+  adminConfirm('এই জব Done করবেন?', async () => {
+    await finalizeBuyerJob(j, 'Completed');
+    await save();
+    renderMyJobs();
+    if(typeof renderJobs === 'function') renderJobs();
+    updateUI();
+    toast('Job completed');
+  });
+}
+
+function extendMyJob(i){
+  if(!currentUser || !currentUser.postedJobs || !currentUser.postedJobs[i]) return;
+  const j = currentUser.postedJobs[i];
+  if(j.status === 'Completed' || j.status === 'Expired') return toast('এই জব শেষ','err');
+  const extra = parseInt(prompt('কতদিন বাড়াবেন? (১–৬০)', '7'), 10);
+  if(extra === null || isNaN(extra)) return;
+  if(!extra || extra < 1) return toast('সঠিক দিন দিন','err');
+  if(extra > 60) return toast('সর্বোচ্চ ৬০ দিন','err');
+  const curEst = Number(j.estDays)||0;
+  if(curEst + extra > 60) return toast('মোট মেয়াদ ৬০ দিনের বেশি হবে না','err');
+  adminConfirm(extra + ' দিন বাড়াবেন?', () => {
+    j.estDays = curEst + extra;
+    const from = (j.expiresAt && j.expiresAt > Date.now()) ? j.expiresAt : Date.now();
+    j.expiresAt = from + (extra * 24 * 60 * 60 * 1000);
+    if(j.status !== 'Paused') j.status = 'Active';
+    syncJobPublicStatus(j).then(()=>{
+      save();
+      renderMyJobs();
+      toast('মেয়াদ বাড়ানো হয়েছে');
+    });
+  });
+}
+
+/** Auto-expire jobs past expiresAt */
+async function checkExpiredJobs(){
+  if(!currentUser || !currentUser.postedJobs) return;
+  let changed = false;
+  for(const job of currentUser.postedJobs){
+    if(!job) continue;
+    if(job.status === 'Completed' || job.status === 'Expired') continue;
+    let exp = job.expiresAt;
+    if(!exp && job.createdAt && job.estDays){
+      exp = Number(job.createdAt) + (Number(job.estDays) * 24 * 60 * 60 * 1000);
+      job.expiresAt = exp;
+    }
+    if(exp && Date.now() > exp){
+      await finalizeBuyerJob(job, 'Expired');
+      changed = true;
+    }
+  }
+  if(changed){
+    await save();
+    if(typeof renderMyJobs === 'function') renderMyJobs();
+    if(typeof renderJobs === 'function') renderJobs();
+    if(typeof updateUI === 'function') updateUI();
+  }
 }
 
 let reviewJobIndex = -1;
@@ -3852,6 +4091,8 @@ async function submitPostJob(){
   currentUser.deposited = bal - total;
   currentUser.postedJobs = currentUser.postedJobs || [];
   const jobId = Date.now() % 1000000;
+  const createdAt = Date.now();
+  const expiresAt = createdAt + (estDays * 24 * 60 * 60 * 1000);
   const job = {
     id: jobId,
     title, note, proof, steps,
@@ -3866,7 +4107,9 @@ async function submitPostJob(){
     time: new Date().toLocaleString(),
     ownerId: currentUser.userId,
     submissions: [],
-    thumbUrl: thumbUrl || null
+    thumbUrl: thumbUrl || null,
+    createdAt,
+    expiresAt
   };
   currentUser.postedJobs.unshift(job);
 
@@ -3887,7 +4130,11 @@ async function submitPostJob(){
     ownerId: currentUser.userId,
     thumbUrl: thumbUrl || null,
     adminUnread: true,
-    createdAt: Date.now()
+    createdAt: createdAt,
+    expiresAt: expiresAt,
+    status: 'Active',
+    earn: earn,
+    workers: workers
   };
   JOBS.unshift(pubJob);
   try {
@@ -4726,10 +4973,15 @@ function adminApproveDep(uid, idx){
     u.notices.unshift({id:Date.now(), title:'সব কাজ আনলক + বোনাস!', body:'Admin approve করেছে। +৳৫০ বোনাস।', time:'Just now'});
   } else {
     u.deposited = (u.deposited||0) + (d.amount||0);
+    u.totalDeposited = (u.totalDeposited||0) + (d.amount||0);
     if(u.referredBy && users[u.referredBy]){
       const commission = (d.amount||0) * 0.05;
       users[u.referredBy].refBal = (users[u.referredBy].refBal||0) + commission;
     }
+  }
+  // unlock deposit also counts toward lifetime total
+  if(d.purpose === 'unlock'){
+    u.totalDeposited = (u.totalDeposited||0) + (d.amount||0);
   }
 if(window.fbSaveUser && u.authUid) window.fbSaveUser(u);
   renderAdminDeposits();
