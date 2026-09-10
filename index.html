@@ -22,45 +22,154 @@ tailwind.config = {
   }
 }
 
-function openLiveChat(){
+/* ===== Live Support = same thread as Admin Live Chat ===== */
+window._userChatUnsub = window._userChatUnsub || null;
+window._userChatKey = window._userChatKey || null;
+
+function getUserChatKey(){
+  return (typeof currentUser !== 'undefined' && currentUser && (currentUser.authUid || currentUser.userId)) || 'guest';
+}
+
+function renderUserChatMessages(msgs){
+  const box = document.getElementById('chatMessages');
+  if(!box) return;
+  const welcome = `<div class="flex gap-3">
+    <div class="w-8 h-8 rounded-xl bg-slate-900 text-white text-sm flex items-center justify-center flex-shrink-0 font-bold shadow">A</div>
+    <div class="bg-white rounded-2xl rounded-tl-sm px-4 py-3 text-sm shadow-xs max-w-[85%] text-slate-900 font-medium border border-slate-200">
+      হ্যালো! SolixPay সাপোর্টে স্বাগতম। কীভাবে সাহায্য করতে পারি?
+    </div>
+  </div>`;
+  if(!msgs || !msgs.length){
+    box.innerHTML = welcome;
+    return;
+  }
+  let html = welcome;
+  msgs.forEach(m => {
+    const text = String(m.text || '').replace(/</g, '&lt;');
+    const time = m.time || '';
+    if(m.fromAdmin){
+      html += `<div class="flex gap-2">
+        <div class="w-7 h-7 rounded-full bg-slate-900 text-white text-xs flex items-center justify-center flex-shrink-0">A</div>
+        <div class="bg-white rounded-2xl rounded-tl-sm px-3 py-2 text-sm shadow-sm max-w-[80%] border border-slate-200">
+          <p class="whitespace-pre-wrap">${text}</p>
+          <p class="text-[10px] text-slate-400 mt-1">${time}</p>
+        </div>
+      </div>`;
+    } else {
+      html += `<div class="flex gap-2 justify-end">
+        <div class="bg-green-600 text-white rounded-2xl rounded-tr-sm px-3 py-2 text-sm max-w-[80%]">
+          <p class="whitespace-pre-wrap">${text}</p>
+          <p class="text-[10px] text-green-100 mt-1">${time}</p>
+        </div>
+      </div>`;
+    }
+  });
+  box.innerHTML = html;
+  box.scrollTop = box.scrollHeight;
+}
+
+function filterThreadMsgs(list, key){
+  return (list || []).filter(m => {
+    const k = m.threadId || (m.fromAdmin ? m.to : m.fromId);
+    return k === key;
+  }).sort((a,b) => (a.ts||0) - (b.ts||0));
+}
+
+async function openLiveChat(){
   document.getElementById('liveChat').classList.remove('hidden');
-  document.getElementById('chatInput').focus();
-  markChatSeen();
+  const input = document.getElementById('chatInput');
+  if(input) input.focus();
+  if(typeof markChatSeen === 'function') markChatSeen();
+  const key = getUserChatKey();
+  window._userChatKey = key;
+  let msgs = [];
+  try {
+    if(window.fbLoadChatsForUser) msgs = await window.fbLoadChatsForUser(key);
+    else if(window.fbLoadChats) msgs = filterThreadMsgs(await window.fbLoadChats(), key);
+  } catch(e){ console.error(e); }
+  msgs = filterThreadMsgs(msgs, key);
+  renderUserChatMessages(msgs);
+
+  if(window._userChatUnsub){ try { window._userChatUnsub(); } catch(e){} window._userChatUnsub = null; }
+  if(window.fbListenChats){
+    window._userChatUnsub = window.fbListenChats((list) => {
+      const mine = filterThreadMsgs(list, key);
+      const chatEl = document.getElementById('liveChat');
+      const open = chatEl && !chatEl.classList.contains('hidden');
+      if(open){
+        renderUserChatMessages(mine);
+        if(typeof markChatSeen === 'function') markChatSeen();
+      } else {
+        const last = mine[mine.length - 1];
+        if(last && last.fromAdmin && typeof setChatUnread === 'function') setChatUnread(true);
+      }
+    });
+  }
 }
 function closeLiveChat(){
   document.getElementById('liveChat').classList.add('hidden');
-  markChatSeen();
+  if(typeof markChatSeen === 'function') markChatSeen();
 }
-function sendChat(){
+async function sendChat(){
   const input = document.getElementById('chatInput');
-  const msg = input.value.trim();
+  const msg = (input?.value || '').trim();
   if(!msg) return;
-  const box = document.getElementById('chatMessages');
-  box.innerHTML += `<div class="flex gap-2 justify-end"><div class="bg-green-600 text-white rounded-2xl rounded-tr-sm px-3 py-2 text-sm max-w-[80%]">${msg}</div></div>`;
+  const key = getUserChatKey();
+  const fromName = (typeof currentUser !== 'undefined' && currentUser && currentUser.name) || 'Guest';
+  const payload = {
+    fromId: key,
+    fromName,
+    to: 'admin',
+    text: msg,
+    time: new Date().toLocaleString(),
+    ts: Date.now(),
+    unread: true,
+    fromAdmin: false,
+    threadId: key
+  };
+
+  let isFirstUserMsg = true;
   try {
-    const fromId = (currentUser&& (currentUser.authUid||currentUser.userId))||'guest';
-    const fromName = (currentUser&&currentUser.name)||'Guest';
-    const payload = {fromId, fromName, to:'admin', text:msg, time:new Date().toLocaleString(), ts:Date.now(), unread:true, fromAdmin:false, threadId: fromId};
-    if(window.fbAddChat) window.fbAddChat(payload).catch(console.error);
+    let existing = [];
+    if(window.fbLoadChatsForUser) existing = await window.fbLoadChatsForUser(key);
+    else if(window.fbLoadChats) existing = filterThreadMsgs(await window.fbLoadChats(), key);
+    isFirstUserMsg = !(existing || []).some(m => !m.fromAdmin);
   } catch(e){}
 
-  input.value = '';
-  box.scrollTop = box.scrollHeight;
-  setTimeout(()=>{
-    const replies = [
-      'ধন্যবাদ! আমরা শীঘ্রই দেখছি।',
-      'আপনার সমস্যাটি নোট করা হয়েছে। অ্যাডমিন শীঘ্রই জবাব দিবে।',
-      'কোনো ডিপোজিট/উইথড্র ইস্যু থাকলে ট্রানজেকশন আইডি দিন।',
-      'অনুগ্রহ করে একটু অপেক্ষা করুন, সাপোর্ট এজেন্ট দেখছেন।',
-      'আর কিছু জানতে চাইলে বলুন!'
-    ];
-    const r = replies[Math.floor(Math.random()*replies.length)];
-    box.innerHTML += `<div class="flex gap-2"><div class="w-7 h-7 rounded-full bg-slate-900 text-white text-xs flex items-center justify-center flex-shrink-0">A</div><div class="bg-white rounded-2xl rounded-tl-sm px-3 py-2 text-sm shadow-sm max-w-[80%]">${r}</div></div>`;
+  try {
+    if(window.fbAddChat) await window.fbAddChat(payload);
+  } catch(e){ console.error(e); }
+
+  if(input) input.value = '';
+
+  const box = document.getElementById('chatMessages');
+  if(box){
+    box.innerHTML += `<div class="flex gap-2 justify-end"><div class="bg-green-600 text-white rounded-2xl rounded-tr-sm px-3 py-2 text-sm max-w-[80%]"><p class="whitespace-pre-wrap">${msg.replace(/</g,'&lt;')}</p></div></div>`;
     box.scrollTop = box.scrollHeight;
-    // if chat closed, show red badge
-    const chatEl = document.getElementById('liveChat');
-    if(chatEl && chatEl.classList.contains('hidden')) setChatUnread(true);
-  }, 900 + Math.random()*800);
+  }
+
+  // Only first message: one connecting auto-reply (no fake random replies)
+  if(isFirstUserMsg){
+    const auto = {
+      fromId: 'admin',
+      fromName: 'Support',
+      to: key,
+      threadId: key,
+      text: 'অপেক্ষা করুন, Agent এর সাথে কানেক্ট করা হচ্ছে...',
+      time: new Date().toLocaleString(),
+      ts: Date.now() + 1,
+      unread: false,
+      fromAdmin: true,
+      isAuto: true
+    };
+    try {
+      if(window.fbAddChat) await window.fbAddChat(auto);
+      else if(box){
+        box.innerHTML += `<div class="flex gap-2"><div class="w-7 h-7 rounded-full bg-slate-900 text-white text-xs flex items-center justify-center flex-shrink-0">A</div><div class="bg-white rounded-2xl rounded-tl-sm px-3 py-2 text-sm shadow-sm max-w-[80%] border border-slate-200">${auto.text}</div></div>`;
+        box.scrollTop = box.scrollHeight;
+      }
+    } catch(e){ console.error(e); }
+  }
 }
 
 function togglePass(id, btn){
@@ -2273,6 +2382,28 @@ function initDash(){
   }
   updateNotifyBadge();
   updateChatBadge();
+  // Listen for admin Live Support replies (badge + chat, no notice)
+  startUserChatListener();
+}
+
+function startUserChatListener(){
+  const key = getUserChatKey();
+  if(!key || key === 'guest') return;
+  window._userChatKey = key;
+  if(window._userChatUnsub){ try { window._userChatUnsub(); } catch(e){} window._userChatUnsub = null; }
+  if(!window.fbListenChats) return;
+  window._userChatUnsub = window.fbListenChats((list) => {
+    const mine = filterThreadMsgs(list, key);
+    const chatEl = document.getElementById('liveChat');
+    const open = chatEl && !chatEl.classList.contains('hidden');
+    if(open){
+      renderUserChatMessages(mine);
+      if(typeof markChatSeen === 'function') markChatSeen();
+    } else {
+      const last = mine[mine.length - 1];
+      if(last && last.fromAdmin) setChatUnread(true);
+    }
+  });
 }
 function updateUI(){
   if(!currentUser)return;
@@ -5043,14 +5174,14 @@ async function adminReplyInThread(){
     text: textMsg,
     time: new Date().toLocaleString(),
     ts: Date.now(),
-    unread: false,
+    unread: true,
     fromAdmin: true
   };
   try {
     if(window.fbAddChat) await window.fbAddChat(payload);
   } catch(e){ console.error(e); return toast('পাঠাতে ব্যর্থ','err'); }
 
-  // notify user if found
+  // Only Live Support chat + badge — NO notification notice
   let u = users[_adminActiveThread] || Object.values(users).find(x => x.authUid === _adminActiveThread || x.userId === _adminActiveThread);
   if(!u && window.fbLoadUser) {
     try { u = await window.fbLoadUser(_adminActiveThread); } catch(e){}
@@ -5059,8 +5190,6 @@ async function adminReplyInThread(){
     try { u = await window.fbFindUserByUserId(_adminActiveThread); } catch(e){}
   }
   if(u){
-    u.notices = u.notices || [];
-    u.notices.unshift({id:Date.now(), title:'Support Reply', body:textMsg, time:new Date().toLocaleString()});
     u.chatUnread = true;
     if(window.fbSaveUser && u.authUid) window.fbSaveUser(u);
   }
