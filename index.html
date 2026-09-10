@@ -1064,8 +1064,22 @@ body.dark-theme .side-item:hover,body.dark-theme .side-item.active{background:#0
         <p class="text-sm font-bold text-blue-600 mb-2">SUBMIT REQUIRED WORK PROVE</p>
         <textarea id="jdProveText" class="input-f h-24 mb-3 resize-none" placeholder="Prove Text Max Length is 2500 Character" maxlength="2500"></textarea>
         <div id="jdShotsBox" class="mb-4"></div>
-        <p class="text-xs text-slate-500 mb-3 font-medium">শুধুমাত্র JPG, PNG বা WEBP ফাইল আপলোড করুন (Max 2)</p>
         <button onclick="submitJobProof()" class="w-full bg-green-600 hover:bg-green-700 text-white font-bold py-3 rounded-xl shadow-md flex items-center justify-center gap-2"><i class="fa-solid fa-check"></i> Submit</button>
+      </div>
+    </div>
+    <!-- Job poster = same profile info as owner's Profile page -->
+    <div id="jdOwnerBox" class="bg-white rounded-3xl border border-slate-200 shadow-sm overflow-hidden mb-3 hidden">
+      <div class="bg-gradient-to-br from-green-50 to-emerald-50 px-5 pt-5 pb-8 text-center">
+        <p class="text-[10px] font-bold text-green-700/70 uppercase tracking-[0.2em] mb-1">Job Posted By</p>
+      </div>
+      <div class="px-5 -mt-10 pb-5 text-center">
+        <div class="relative inline-block">
+          <div id="jdOwnerAvatar" class="w-20 h-20 rounded-full bg-slate-900 text-white text-2xl font-bold flex items-center justify-center border-4 border-white shadow-lg mx-auto overflow-hidden">U</div>
+          <span id="jdOwnerOnlineDot" class="absolute bottom-1 right-1 w-4 h-4 bg-slate-300 border-2 border-white rounded-full"></span>
+        </div>
+        <h2 class="mt-3 text-lg font-extrabold text-slate-900" id="jdOwnerName">—</h2>
+        <p class="text-sm text-slate-800 font-bold mt-2">User ID: <span id="jdOwnerId" class="text-green-600 font-mono text-xs break-all">—</span></p>
+        <p class="text-sm font-semibold mt-2" id="jdOwnerStatus">I'm offline</p>
       </div>
     </div>
   </div>
@@ -1230,11 +1244,11 @@ body.dark-theme .side-item:hover,body.dark-theme .side-item.active{background:#0
       <label class="block text-sm font-semibold text-green-700 mb-1">Worker Need</label>
       <input type="number" id="pjWorkers" class="input-f mb-3" min="1" value="1" oninput="calcJobCost()">
       <label class="block text-sm font-semibold text-green-700 mb-1">Each worker Earn (৳)</label>
-      <input type="number" id="pjEarn" class="input-f mb-3" min="1" step="0.5" value="3" oninput="calcJobCost()">
+      <input type="number" id="pjEarn" class="input-f mb-3" min="2" step="0.5" value="3" oninput="calcJobCost()">
       <label class="block text-sm font-semibold text-green-700 mb-1">Require Screenshots <span class="text-slate-400 font-normal">(Max 2)</span></label>
       <input type="number" id="pjScreens" class="input-f mb-3" min="0" max="2" value="0" oninput="if(this.value>2)this.value=2;if(this.value<0)this.value=0">
       <label class="block text-sm font-semibold text-green-700 mb-1">Estimated Day</label>
-      <input type="number" id="pjEstDays" class="input-f mb-3" min="1" value="3">
+      <input type="number" id="pjEstDays" class="input-f mb-3" min="1" max="60" value="3" oninput="if(this.value>60)this.value=60;if(this.value<1)this.value=1">
       <label class="block text-sm font-semibold text-green-700 mb-1">Boost Period <span class="text-slate-400 font-normal">(optional)</span></label>
       <select id="pjBoost" class="input-f mb-3">
         <option value="None">None</option>
@@ -1375,7 +1389,7 @@ body.dark-theme .side-item:hover,body.dark-theme .side-item.active{background:#0
     </div>
     <div class="bg-white rounded-2xl border border-slate-200 p-4 text-xs text-red-500 space-y-1.5 leading-relaxed font-medium">
       <p>• Jobs in the YouTube category must be exclusive to our platform. Posting them on other platforms at the same time may lead to rejection and account ban.</p>
-      <p>• Jobs marked as Completed for over 30 days will be automatically deleted, including all proofs and related data.</p>
+      <p>• Jobs marked as Completed for over 60 days will be automatically deleted, including all proofs and related data.</p>
       <p>• Any Top Job that is not updated within 7 days will be removed from the Top Job section.</p>
     </div>
   </div>
@@ -1771,7 +1785,6 @@ body.dark-theme .side-item:hover,body.dark-theme .side-item.active{background:#0
         <div class="bg-amber-50 border border-amber-200 rounded-xl px-4 py-3 text-sm text-amber-800 font-medium">
           Status: <span class="font-bold">Pending Review</span>
         </div>
-        <button onclick="demoApproveVerify()" class="mt-5 text-xs text-slate-400 underline">Demo: Admin Approve</button>
       </div>
 
       <div id="verifyApprovedBox" class="hidden text-center py-6">
@@ -2750,6 +2763,8 @@ function getFilteredJobs(){
   if(jobFilter.location) list = list.filter(j => (j.zone||'') === jobFilter.location);
   if(jobFilter.sort === 'highest') list.sort((a,b)=>b.price-a.price);
   else if(jobFilter.sort === 'recent') list = list.slice().reverse();
+  // Always show pinned jobs first
+  list.sort((a,b) => (b.pinned?1:0) - (a.pinned?1:0));
   return list;
 }
 
@@ -2785,6 +2800,7 @@ function renderJobs(){
         <div class="flex-1 min-w-0 pr-2">
           <h3 class="font-bold text-slate-900 text-sm flex flex-wrap items-center gap-1">
             ${j.title}
+            ${j.pinned?`<span class="text-[10px] bg-amber-100 text-amber-700 px-2 py-0.5 rounded-full font-semibold"><i class="fa-solid fa-thumbtack"></i> PIN</span>`:''}
             ${j.badge?`<span class="text-[10px] bg-green-100 text-green-700 px-2 py-0.5 rounded-full font-semibold">${j.badge}</span>`:''}
           </h3>
         </div>
@@ -2842,6 +2858,68 @@ function openJobDetail(id){
   const submitEl = document.getElementById('jdSubmitBox');
   if(warnEl) warnEl.classList.toggle('hidden', isVerified);
   if(submitEl) submitEl.classList.toggle('hidden', !isVerified);
+
+  // Job poster profile = same data as owner's Profile (photoUrl, name, userId, online)
+  const ownerBox = document.getElementById('jdOwnerBox');
+  const ownerNameEl = document.getElementById('jdOwnerName');
+  const ownerIdEl = document.getElementById('jdOwnerId');
+  const ownerAv = document.getElementById('jdOwnerAvatar');
+  const ownerDot = document.getElementById('jdOwnerOnlineDot');
+  const ownerSt = document.getElementById('jdOwnerStatus');
+  let ownerName = j.ownerName || '';
+  let ownerId = j.ownerId || '';
+  let ownerPhoto = '';
+  let ownerOnline = false;
+  let ownerUser = null;
+  if(ownerId){
+    ownerUser = users[ownerId] || Object.values(users||{}).find(x => x.authUid === ownerId || x.userId === ownerId);
+  }
+  // Try load from Firestore if not in local cache
+  (async () => {
+    if(!ownerUser && ownerId && window.fbLoadUser){
+      try { ownerUser = await window.fbLoadUser(ownerId); } catch(e){}
+    }
+    if(!ownerUser && ownerId && window.fbFindUserByUserId){
+      try { ownerUser = await window.fbFindUserByUserId(ownerId); } catch(e){}
+    }
+    if(ownerUser){
+      ownerName = ownerUser.name || ownerName || 'User';
+      ownerId = ownerUser.authUid || ownerUser.userId || ownerId;
+      ownerPhoto = ownerUser.photoUrl || '';
+      if(typeof isUserOnline === 'function') ownerOnline = isUserOnline(ownerUser);
+    }
+    if(ownerBox){
+      if(ownerId || ownerName){
+        ownerBox.classList.remove('hidden');
+        if(ownerNameEl) ownerNameEl.textContent = ownerName || '—';
+        if(ownerIdEl) ownerIdEl.textContent = ownerId || '—';
+        if(ownerAv){
+          const initial = (ownerName || 'U').charAt(0).toUpperCase();
+          if(ownerPhoto){
+            ownerAv.innerHTML = '<img src="'+String(ownerPhoto).replace(/"/g,'')+'" alt="avatar" class="w-full h-full object-cover">';
+            ownerAv.classList.remove('bg-slate-900');
+          } else {
+            ownerAv.textContent = initial;
+            ownerAv.classList.add('bg-slate-900');
+          }
+        }
+        if(ownerDot){
+          ownerDot.className = 'absolute bottom-1 right-1 w-4 h-4 border-2 border-white rounded-full ' + (ownerOnline ? 'bg-green-500' : 'bg-slate-300');
+        }
+        if(ownerSt){
+          if(ownerOnline){
+            ownerSt.className = 'text-sm text-green-600 font-semibold mt-2';
+            ownerSt.textContent = "I'm online";
+          } else {
+            ownerSt.className = 'text-sm text-slate-400 font-semibold mt-2';
+            ownerSt.textContent = "I'm offline";
+          }
+        }
+      } else {
+        ownerBox.classList.add('hidden');
+      }
+    }
+  })();
   goView('jobdetail');
 }
 
@@ -2896,11 +2974,12 @@ async function submitJobProof(){
     ownerId: currentJob.ownerId || null
   };
 
-  if(currentJob.ownerId && users[currentJob.ownerId]){
-    taskEntry.status = 'Pending';
-    currentUser.tasks = currentUser.tasks||[];
-    currentUser.tasks.unshift(taskEntry);
+  // Always Pending — no auto approve. Buyer (if owner) or Admin must approve.
+  taskEntry.status = 'Pending';
+  currentUser.tasks = currentUser.tasks||[];
+  currentUser.tasks.unshift(taskEntry);
 
+  if(currentJob.ownerId && users[currentJob.ownerId]){
     const owner = users[currentJob.ownerId];
     owner.postedJobs = owner.postedJobs || [];
     let pj = owner.postedJobs.find(j => j.id === currentJob.id);
@@ -2928,32 +3007,13 @@ async function submitJobProof(){
     if(owner.seenNoticeIds){
       owner.seenNoticeIds = owner.seenNoticeIds.filter(id => id !== (Date.now()+1));
     }
-save();
-    updateUI();
-    toast('Proof সাবমিট হয়েছে! Buyer Review করবে।');
   } else {
-    taskEntry.status = 'Approved';
-    currentUser.earned = (currentUser.earned||0) + price;
-    currentUser.totalEarned = (currentUser.totalEarned||0) + price;
-    currentUser.tasks = currentUser.tasks||[];
-    currentUser.tasks.unshift(taskEntry);
-    currentJob.done = Math.min((currentJob.done||0)+1, currentJob.total||9999);
-    // First task professional notice about unlock
-    if(!currentUser.firstTaskDone){
-      currentUser.firstTaskDone = true;
-      currentUser.notices = currentUser.notices || [];
-      currentUser.notices.unshift({
-        id: Date.now()+5,
-        ts: Date.now(),
-        title: 'প্রথম কাজ সম্পন্ন!',
-        body: 'অভিনন্দন! আপনার প্রথম কাজ সফল হয়েছে।\n\nসব কাজ পেতে ৳৫০০ Earning থাকতে হবে।\nঅথবা Unlock Deposit করেও সব কাজ আনলক করতে পারবেন।\n\nবর্তমানে কিছু স্টার্টার কাজ উপলব্ধ।',
-        time: new Date().toLocaleString()
-      });
-    }
-    checkAndUnlockByEarning();
-    save(); updateUI();
-    toast('+৳'+price.toFixed(2)+' earned!');
+    // System / no-owner job: stay Pending for Admin review only
+    taskEntry.needsAdminReview = true;
   }
+  save();
+  updateUI();
+  toast('Proof সাবমিট হয়েছে! Admin/Buyer Approve-এর অপেক্ষায়।');
   goView('jobs');
 }
 
@@ -3324,16 +3384,6 @@ async function submitVerify(){
   updateUI();
   renderVerifyView();
   toast('আবেদন জমা হয়েছে! ৩ ঘণ্টার মধ্যে দেখে জানানো হবে');
-}
-
-function demoApproveVerify(){
-  if(!currentUser) return;
-  currentUser.verifyStatus = 'approved';
-  currentUser.verified = true;
-  save();
-  updateUI();
-  renderVerifyView();
-  toast('Verification approved! এখন কাজ করতে পারবেন');
 }
 
 const DEP_NUMBERS = { bKash: '01712345678', Nagad: '01812345678' };
@@ -3776,7 +3826,9 @@ async function submitPostJob(){
   const proof = (document.getElementById('pjProof')?.value||'').trim();
   const steps = [...document.querySelectorAll('.pj-step-input')].map(i=>i.value.trim()).filter(Boolean);
   if(workers < 1) return toast('Worker Need কমপক্ষে ১','err');
-  if(earn < 1) return toast('Each worker Earn কমপক্ষে ৳1','err');
+  if(earn < 2) return toast('Each worker Earn কমপক্ষে ৳2','err');
+  if(estDays < 1) return toast('Estimated Day কমপক্ষে ১','err');
+  if(estDays > 60) return toast('Estimated Day সর্বোচ্চ ৬০ দিন','err');
   const base = workers * earn;
   const total = base * 1.05;
   if(total < 50) return toast('Minimum spend ৳50','err');
@@ -4046,6 +4098,7 @@ async function checkAutoDeleteBanned(){
   } catch(e){}
 }
 
+/* Auto-approve DISABLED — Admin/Buyer must approve manually. No demo auto-credit. */
 /* Auto-approve submissions if buyer doesn't review within 3 days */
 async function checkAutoApproveSubmissions(){
   if(!currentUser || !currentUser.postedJobs) return;
@@ -4109,6 +4162,8 @@ document.addEventListener('DOMContentLoaded', async ()=>{
   try {
     if(window.fbReady) await window.fbReady;
   } catch(e) {}
+
+  try { await applyDepositNumbersFromSettings(); } catch(e){}
 
   if(window._fbPendingUser) {
     currentUser = window._fbPendingUser;
@@ -4442,9 +4497,11 @@ function adminUserCard(u, opts){
     // all users / normal
     actions = u.banned ? `
       <button onclick="adminConfirm('Unsuspend confirm করবেন?',()=>adminToggleBan('${u.authUid}'))" class="text-[11px] px-3 py-1.5 rounded-lg font-semibold bg-green-100 text-green-700">Unsuspend</button>
-      <button onclick="adminConfirm('Permanent Ban? অ্যাকাউন্ট মুছে যাবে ও আর Login করতে পারবে না!',()=>adminPermanentBan('${u.authUid}'))" class="text-[11px] px-3 py-1.5 rounded-lg font-semibold bg-slate-900 text-white">Permanent Ban</button>` : `
+      <button onclick="adminConfirm('Permanent Ban? অ্যাকাউন্ট মুছে যাবে ও আর Login করতে পারবে না!',()=>adminPermanentBan('${u.authUid}'))" class="text-[11px] px-3 py-1.5 rounded-lg font-semibold bg-slate-900 text-white">Permanent Ban</button>
+      <button onclick="adminSendUserNotice('${u.authUid}')" class="text-[11px] px-3 py-1.5 rounded-lg font-semibold bg-indigo-100 text-indigo-700"><i class="fa-solid fa-bell"></i> Notice</button>` : `
       <button onclick="adminConfirm('Suspend confirm করবেন?',()=>adminToggleBan('${u.authUid}'))" class="text-[11px] px-3 py-1.5 rounded-lg font-semibold bg-red-100 text-red-600">Suspend</button>
-      <button onclick="adminConfirm('Permanent Ban? অ্যাকাউন্ট মুছে যাবে ও আর Login করতে পারবে না!',()=>adminPermanentBan('${u.authUid}'))" class="text-[11px] px-3 py-1.5 rounded-lg font-semibold bg-slate-900 text-white">Permanent Ban</button>`;
+      <button onclick="adminConfirm('Permanent Ban? অ্যাকাউন্ট মুছে যাবে ও আর Login করতে পারবে না!',()=>adminPermanentBan('${u.authUid}'))" class="text-[11px] px-3 py-1.5 rounded-lg font-semibold bg-slate-900 text-white">Permanent Ban</button>
+      <button onclick="adminSendUserNotice('${u.authUid}')" class="text-[11px] px-3 py-1.5 rounded-lg font-semibold bg-indigo-100 text-indigo-700"><i class="fa-solid fa-bell"></i> Notice</button>`;
   }
   return `<div class="bg-white rounded-2xl border border-slate-200 p-4 shadow-sm ${online?'ring-1 ring-green-200':''}">
     <div class="flex justify-between items-start mb-2">
@@ -4468,6 +4525,36 @@ function adminUserCard(u, opts){
     </div>
     <div class="flex flex-wrap gap-2">${actions}</div>
   </div>`;
+}
+
+async function adminSendUserNotice(uid){
+  const u = users[uid] || Object.values(users).find(x => x.authUid===uid);
+  if(!u) return toast('User পাওয়া যায়নি','err');
+  const title = prompt('Notice Title:', 'Admin Notice');
+  if(title === null) return;
+  const t = (title||'').trim();
+  if(!t) return toast('Title দিন','err');
+  const body = prompt('Notice Message:', '');
+  if(body === null) return;
+  const b = (body||'').trim();
+  if(!b) return toast('Message দিন','err');
+  u.notices = u.notices || [];
+  u.notices.unshift({
+    id: Date.now() + Math.random(),
+    title: t,
+    body: b,
+    time: new Date().toLocaleString(),
+    ts: Date.now(),
+    fromAdmin: true
+  });
+  if(u.seenNoticeIds){
+    // ensure unread
+  }
+  if(window.fbSaveUser && u.authUid) {
+    try { await window.fbSaveUser(u); } catch(e){ console.error(e); }
+  }
+  users[u.authUid || u.userId] = u;
+  toast('Notice পাঠানো হয়েছে — User Notification-এ দেখবে');
 }
 
 async function renderAdminUsers(){
@@ -4781,21 +4868,26 @@ function renderAdminJobs(){
   const el = document.getElementById('adminJobsList');
   if(!el) return;
   let list = JOBS.slice();
+  // Pinned first
+  list.sort((a,b) => (b.pinned?1:0) - (a.pinned?1:0));
   const q = (document.getElementById('adminSearchJobs')?.value||'').trim().toLowerCase();
   if(q) list = list.filter(j => JSON.stringify(j).toLowerCase().includes(q));
   if(!list.length){ el.innerHTML='<p class="text-slate-400 text-center py-8">No jobs</p>'; return; }
   el.innerHTML = list.map((j,i)=>{
     const realIdx = JOBS.indexOf(j);
     i = realIdx >= 0 ? realIdx : i;
-    return `<div class="bg-white rounded-2xl border border-slate-200 p-4 shadow-sm">
+    const pinLabel = j.pinned ? 'Unpin' : 'Pin';
+    const pinCls = j.pinned ? 'bg-amber-100 text-amber-800' : 'bg-blue-100 text-blue-700';
+    const pinBadge = j.pinned ? '<span class="text-[10px] bg-amber-100 text-amber-700 px-2 py-0.5 rounded-full font-bold ml-1">PINNED</span>' : '';
+    return `<div class="bg-white rounded-2xl border border-slate-200 p-4 shadow-sm ${j.pinned?'ring-1 ring-amber-200':''}">
       <div class="flex justify-between mb-1">
-        <p class="font-bold text-slate-900 text-sm">${j.title}</p>
+        <p class="font-bold text-slate-900 text-sm">${j.title}${pinBadge}</p>
         <span class="text-green-600 font-bold">৳${Number(j.price).toFixed(2)}</span>
       </div>
       <p class="text-xs text-slate-500 mb-2">${j.done||0}/${j.total||0} • ${j.category||''} • ${j.zone||''} • Owner: ${j.ownerId||'System'}</p>
       <div class="flex gap-2">
         <button onclick="adminConfirm('এই Job Delete করবেন?',()=>adminDeleteJob(${i}))" class="text-[11px] px-3 py-1.5 rounded-lg font-semibold bg-red-100 text-red-600">Delete</button>
-        <button onclick="adminEditJobPrice(${i})" class="text-[11px] px-3 py-1.5 rounded-lg font-semibold bg-blue-100 text-blue-700">Edit Price</button>
+        <button onclick="adminTogglePinJob(${i})" class="text-[11px] px-3 py-1.5 rounded-lg font-semibold ${pinCls}"><i class="fa-solid fa-thumbtack"></i> ${pinLabel}</button>
       </div>
     </div>`;
   }).join('');
@@ -4811,13 +4903,15 @@ async function adminDeleteJob(i){
   loadAdminStats();
   toast('Job deleted');
 }
-function adminEditJobPrice(i){
+async function adminTogglePinJob(i){
   const j = JOBS[i]; if(!j) return;
-  const p = parseFloat(prompt('New price ৳:', j.price));
-  if(isNaN(p) || p<0) return;
-  j.price = p;
+  j.pinned = !j.pinned;
+  try {
+    if(j._docId && window.fbUpdateJob) await window.fbUpdateJob(j._docId, { pinned: !!j.pinned });
+  } catch(e){ console.error(e); }
   renderAdminJobs();
-  toast('Price updated');
+  if(typeof renderJobs === 'function') renderJobs();
+  toast(j.pinned ? 'Job Pinned — users will see it first' : 'Job Unpinned');
 }
 
 let _adminReportsCache = [];
@@ -4878,20 +4972,50 @@ document.getElementById('admNoticeTitle').value='';
   toast('Notice broadcast to all users');
 }
 
-async function adminSaveSettings(){
+async function adminSaveUnlockSettings(){
   const s = {
     unlockNeed: parseFloat(document.getElementById('admUnlockNeed')?.value)||500,
     depMin: parseFloat(document.getElementById('admDepMin')?.value)||500,
     wdMin: parseFloat(document.getElementById('admWdMin')?.value)||500
   };
   try {
-    if(window.fbSaveSettings) await window.fbSaveSettings(s);
-    if(s.unlockNeed) { /* UNLOCK_EARN_NEED is const; runtime override */ window._unlockNeed = s.unlockNeed; }
-    toast('Settings saved');
+    // merge with existing so deposit numbers are not wiped
+    let prev = {};
+    try { prev = (window.fbLoadSettings && await window.fbLoadSettings()) || {}; } catch(e){}
+    const merged = Object.assign({}, prev, s);
+    if(window.fbSaveSettings) await window.fbSaveSettings(merged);
+    if(s.unlockNeed) window._unlockNeed = s.unlockNeed;
+    toast('Unlock Settings saved');
   } catch(e){
     console.error(e);
     toast('Save failed','err');
   }
+}
+
+async function adminSaveDepositNumbers(){
+  const bk = (document.getElementById('admBkashNo')?.value||'').trim();
+  const ng = (document.getElementById('admNagadNo')?.value||'').trim();
+  if(!bk || !ng) return toast('bKash ও Nagad নম্বর দিন','err');
+  const part = { bkashNo: bk, nagadNo: ng };
+  try {
+    let prev = {};
+    try { prev = (window.fbLoadSettings && await window.fbLoadSettings()) || {}; } catch(e){}
+    const merged = Object.assign({}, prev, part);
+    if(window.fbSaveSettings) await window.fbSaveSettings(merged);
+    DEP_NUMBERS.bKash = bk;
+    DEP_NUMBERS.Nagad = ng;
+    if(typeof onDepMethodChange === 'function') onDepMethodChange();
+    toast('Deposit Numbers saved');
+  } catch(e){
+    console.error(e);
+    toast('Save failed','err');
+  }
+}
+
+// keep old name as alias (in case anything still calls it)
+async function adminSaveSettings(){
+  await adminSaveUnlockSettings();
+  await adminSaveDepositNumbers();
 }
 async function loadAdminSettingsForm(){
   try {
@@ -4901,6 +5025,20 @@ async function loadAdminSettingsForm(){
     set('admUnlockNeed', s.unlockNeed);
     set('admDepMin', s.depMin);
     set('admWdMin', s.wdMin);
+    set('admBkashNo', s.bkashNo || DEP_NUMBERS.bKash);
+    set('admNagadNo', s.nagadNo || DEP_NUMBERS.Nagad);
+    if(s.bkashNo) DEP_NUMBERS.bKash = s.bkashNo;
+    if(s.nagadNo) DEP_NUMBERS.Nagad = s.nagadNo;
+  } catch(e){}
+}
+
+/** Load deposit numbers from settings into DEP_NUMBERS (call on app start) */
+async function applyDepositNumbersFromSettings(){
+  try {
+    const s = window.fbLoadSettings ? await window.fbLoadSettings() : {};
+    if(s && s.bkashNo) DEP_NUMBERS.bKash = s.bkashNo;
+    if(s && s.nagadNo) DEP_NUMBERS.Nagad = s.nagadNo;
+    if(typeof onDepMethodChange === 'function') onDepMethodChange();
   } catch(e){}
 }
 
@@ -5222,10 +5360,13 @@ async function adminOpenThread(key, silent){
     }
   } catch(e){}
   if(!name) name = 'User';
-  if(header) header.innerHTML = `<div class="leading-tight">
+  const headerText = document.getElementById('adminChatThreadHeaderText');
+  const closeBtn = document.getElementById('adminChatCloseBtn');
+  if(headerText) headerText.innerHTML = `<div class="leading-tight">
     <p class="font-bold text-slate-900">${name}</p>
     <p class="text-[11px] text-slate-500 font-medium mt-0.5">User ID: <span class="font-mono text-slate-700 break-all">${uid}</span></p>
   </div>`;
+  if(closeBtn) closeBtn.classList.remove('hidden');
 
   if(box){
     if(!msgs.length) box.innerHTML = '<p class="text-slate-400 text-center text-sm py-8">No messages</p>';
@@ -5255,6 +5396,19 @@ async function adminOpenThread(key, silent){
     }
   }
   if(!silent) renderAdminChat();
+}
+
+function adminCloseThread(){
+  _adminActiveThread = null;
+  const headerText = document.getElementById('adminChatThreadHeaderText');
+  const closeBtn = document.getElementById('adminChatCloseBtn');
+  const box = document.getElementById('adminChatThreadMsgs');
+  const replyBox = document.getElementById('adminChatReplyBox');
+  if(headerText) headerText.textContent = 'একটি কথোপকথন সিলেক্ট করুন';
+  if(closeBtn) closeBtn.classList.add('hidden');
+  if(box) box.innerHTML = '';
+  if(replyBox) replyBox.classList.add('hidden');
+  renderAdminChatFromCache();
 }
 
 async function adminReplyInThread(){
@@ -5715,7 +5869,10 @@ function openSitePage(key){
           <div id="adminChatThreads" class="flex-1 overflow-y-auto p-2 space-y-1"></div>
         </div>
         <div class="sm:col-span-3 bg-white rounded-2xl border border-slate-200 overflow-hidden flex flex-col max-h-[520px]">
-          <div id="adminChatThreadHeader" class="px-4 py-3 border-b border-slate-100 text-sm font-semibold text-slate-700">একটি কথোপকথন সিলেক্ট করুন</div>
+          <div id="adminChatThreadHeader" class="px-4 py-3 border-b border-slate-100 text-sm font-semibold text-slate-700 flex items-center justify-between gap-2">
+            <span id="adminChatThreadHeaderText">একটি কথোপকথন সিলেক্ট করুন</span>
+            <button type="button" id="adminChatCloseBtn" onclick="adminCloseThread()" class="hidden flex-shrink-0 text-xs font-bold px-3 py-1.5 rounded-lg bg-slate-100 hover:bg-slate-200 text-slate-700"><i class="fa-solid fa-arrow-left"></i> Close</button>
+          </div>
           <div id="adminChatThreadMsgs" class="flex-1 overflow-y-auto p-4 space-y-3 bg-slate-50"></div>
           <div id="adminChatReplyBox" class="hidden p-3 border-t border-slate-200 flex gap-2">
             <input type="text" id="adminChatReplyInput" class="flex-1 input-f text-sm" placeholder="রিপ্লাই লিখুন..." onkeydown="if(event.key==='Enter')adminReplyInThread()">
@@ -5834,7 +5991,9 @@ Support: Live Chat inside the app</textarea>
     <div id="admin-settings" class="hidden">
       <h2 class="font-bold text-lg text-slate-900 mb-3">Site Settings</h2>
 
-      <div class="bg-white rounded-2xl border border-slate-200 p-5 shadow-sm space-y-4">
+      <!-- Part 1: Unlock / Limits -->
+      <div class="bg-white rounded-2xl border border-slate-200 p-5 shadow-sm space-y-4 mb-4">
+        <p class="text-xs font-bold text-green-700 uppercase">Unlock Earning &amp; Limits</p>
         <div>
           <label class="block text-sm font-semibold text-slate-700 mb-1">Unlock Earning Threshold (৳)</label>
           <input type="number" id="admUnlockNeed" class="input-f" value="500">
@@ -5847,9 +6006,21 @@ Support: Live Chat inside the app</textarea>
           <label class="block text-sm font-semibold text-slate-700 mb-1">Withdraw Min (৳)</label>
           <input type="number" id="admWdMin" class="input-f" value="500">
         </div>
-        <button onclick="adminSaveSettings()" class="w-full bg-slate-900 hover:bg-slate-800 text-white font-bold py-3 rounded-xl">Save Settings</button>
+        <button onclick="adminSaveUnlockSettings()" class="w-full bg-slate-900 hover:bg-slate-800 text-white font-bold py-3 rounded-xl">Save Unlock Settings</button>
       </div>
-      <div class="bg-amber-50 border border-amber-200 rounded-2xl p-4 mt-4 text-sm text-amber-900">
+
+      <!-- Part 2: Deposit Cash-Out Numbers -->
+      <div class="bg-white rounded-2xl border border-slate-200 p-5 shadow-sm space-y-4 mb-4">
+        <p class="text-xs font-bold text-green-700 uppercase">Deposit Cash-Out Numbers</p>
+        <label class="block text-sm font-semibold text-slate-700 mb-1">bKash Number</label>
+        <input type="text" id="admBkashNo" class="input-f mb-3" value="01712345678" placeholder="01XXXXXXXXX" maxlength="11">
+        <label class="block text-sm font-semibold text-slate-700 mb-1">Nagad Number</label>
+        <input type="text" id="admNagadNo" class="input-f" value="01812345678" placeholder="01XXXXXXXXX" maxlength="11">
+        <p class="text-[11px] text-slate-500 mt-1">এই নম্বরগুলো User Deposit পেজে দেখাবে — Cash Out করার জন্য।</p>
+        <button onclick="adminSaveDepositNumbers()" class="w-full bg-green-600 hover:bg-green-700 text-white font-bold py-3 rounded-xl">Save Deposit Numbers</button>
+      </div>
+
+      <div class="bg-amber-50 border border-amber-200 rounded-2xl p-4 text-sm text-amber-900">
         <p class="font-bold mb-1">Admin Access</p>
         <p class="text-xs leading-relaxed">Admin শুধু Firebase-এ <code>role: "admin"</code> লিখে বানানো যায়। Unlock/Delete অটো (৳৫০০ Earning বা Deposit Accept)।</p>
       </div>
