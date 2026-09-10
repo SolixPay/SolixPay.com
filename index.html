@@ -1378,6 +1378,7 @@ body.dark-theme .side-item:hover,body.dark-theme .side-item.active{background:#0
               <th class="p-3">Job Name</th>
               <th class="p-3">Progress</th>
               <th class="p-3">Cost</th>
+              <th class="p-3">Expires</th>
               <th class="p-3">Status</th>
               <th class="p-3">Action</th>
             </tr>
@@ -1389,6 +1390,8 @@ body.dark-theme .side-item:hover,body.dark-theme .side-item.active{background:#0
     </div>
     <div class="bg-white rounded-2xl border border-slate-200 p-4 text-xs text-red-500 space-y-1.5 leading-relaxed font-medium">
       <p>• Jobs in the YouTube category must be exclusive to our platform. Posting them on other platforms at the same time may lead to rejection and account ban.</p>
+      <p>• Job শুধু পোস্ট করার সময় যে দিন সেট করা হবে, তত দিন পর্যন্ত চলবে। Extend করা যাবে না।</p>
+      <p>• মেয়াদ শেষের আগে (৩ দিন ও ১ দিন আগে) Buyer নোটিফিকেশন পাবেন। মেয়াদ শেষ হলে জব Auto-Expired হবে।</p>
       <p>• Jobs marked as Completed for over 60 days will be automatically deleted, including all proofs and related data.</p>
       <p>• Any Top Job that is not updated within 7 days will be removed from the Top Job section.</p>
     </div>
@@ -2566,14 +2569,20 @@ function updateUI(){
       .filter(d => ['Accepted','Approved','Confirmed','Success'].includes(String(d.status||'')))
       .reduce((s,d) => s + (parseFloat(d.amount)||0), 0);
   }
-  // Fallback: remaining balance + money spent on job posts
-  const spentOnJobs = postedJobs.reduce((s,j) => s + (parseFloat(j.cost)||0), 0);
+  // Fallback: remaining balance + net money spent on job posts
+  // Net spent per job = cost - refunded (unused slots returned on Complete/Expire)
+  const netSpentOnJobs = postedJobs.reduce((s,j) => {
+    const cost = parseFloat(j.cost) || 0;
+    const refunded = parseFloat(j.refunded) || 0;
+    return s + Math.max(cost - refunded, 0);
+  }, 0);
+  const spentOnJobs = netSpentOnJobs;
   if(!totalDepLifetime){
     totalDepLifetime = (Number(currentUser.deposited)||0) + spentOnJobs;
   }
 
-  // Paid = money used to post jobs
-  const paidJobs = spentOnJobs;
+  // Paid = net money actually spent on jobs (refunds subtracted)
+  const paidJobs = netSpentOnJobs;
 
   // Job Over = completed jobs
   const jobOverCount = postedJobs.filter(j => {
@@ -3209,21 +3218,39 @@ function renderMyJobs(){
     const pendingCount = (j.submissions||[]).filter(s => s.status==='Pending').length;
     const ended = status === 'Completed' || status === 'Expired';
     const pauseLabel = status === 'Paused' ? 'Resume' : 'Pause';
+    // Expiry date from initial estDays (no extend)
+    let expTs = j.expiresAt;
+    if(!expTs && j.createdAt && j.estDays){
+      expTs = Number(j.createdAt) + (Number(j.estDays) * 24 * 60 * 60 * 1000);
+    }
+    let expLabel = '—';
+    let expClass = 'text-slate-500';
+    if(expTs){
+      const d = new Date(expTs);
+      expLabel = d.toLocaleDateString(undefined, { day:'2-digit', month:'short', year:'numeric' });
+      const left = expTs - Date.now();
+      if(status !== 'Completed' && status !== 'Expired'){
+        if(left <= 0) expClass = 'text-red-600 font-bold';
+        else if(left <= 24*60*60*1000) expClass = 'text-amber-600 font-bold';
+        else expClass = 'text-slate-700';
+      }
+    }
     const actions = ended ? `
         <button onclick="openJobReviews(${i})" class="text-[10px] bg-blue-100 hover:bg-blue-200 text-blue-700 font-semibold px-2 py-1 rounded-lg relative">
           Review${pendingCount?` <span class="bg-red-500 text-white rounded-full px-1.5">${pendingCount}</span>`:''}
-        </button>` : `
+        </button>
+        <button onclick="deleteMyJob(${i})" class="text-[10px] bg-red-100 hover:bg-red-200 text-red-600 font-semibold px-2 py-1 rounded-lg">Delete</button>` : `
         <button onclick="openJobReviews(${i})" class="text-[10px] bg-blue-100 hover:bg-blue-200 text-blue-700 font-semibold px-2 py-1 rounded-lg relative">
           Review${pendingCount?` <span class="bg-red-500 text-white rounded-full px-1.5">${pendingCount}</span>`:''}
         </button>
         <button onclick="pauseMyJob(${i})" class="text-[10px] bg-slate-100 hover:bg-slate-200 text-slate-700 font-semibold px-2 py-1 rounded-lg">${pauseLabel}</button>
-        <button onclick="extendMyJob(${i})" class="text-[10px] bg-indigo-100 hover:bg-indigo-200 text-indigo-700 font-semibold px-2 py-1 rounded-lg">Extend</button>
         <button onclick="completeMyJob(${i})" class="text-[10px] bg-green-100 hover:bg-green-200 text-green-700 font-semibold px-2 py-1 rounded-lg">Done</button>`;
     return `<tr>
       <td class="p-3 font-semibold text-slate-700">#${id}</td>
       <td class="p-3 font-bold text-slate-900 max-w-[120px] truncate">${j.title || '—'}</td>
       <td class="p-3">${done}/${total}</td>
       <td class="p-3 font-semibold text-green-600">৳${cost}</td>
+      <td class="p-3 text-[11px] ${expClass}">${expLabel}</td>
       <td class="p-3 font-bold ${stClass}">${status}</td>
       <td class="p-3 space-y-1">${actions}
       </td>
@@ -3332,6 +3359,7 @@ function pauseMyJob(i){
       renderMyJobs();
       if(typeof renderJobs === 'function') renderJobs();
       toast(j.status === 'Paused' ? 'Job paused' : 'Job resumed');
+      if(typeof renderAdminJobs === 'function') renderAdminJobs();
     });
   });
 }
@@ -3345,51 +3373,118 @@ function completeMyJob(i){
     await save();
     renderMyJobs();
     if(typeof renderJobs === 'function') renderJobs();
+    if(typeof renderAdminJobs === 'function') renderAdminJobs();
     updateUI();
     toast('Job completed');
   });
 }
 
-function extendMyJob(i){
+/** Buyer can delete job only after Complete / Expired */
+async function deleteMyJob(i){
   if(!currentUser || !currentUser.postedJobs || !currentUser.postedJobs[i]) return;
   const j = currentUser.postedJobs[i];
-  if(j.status === 'Completed' || j.status === 'Expired') return toast('এই জব শেষ','err');
-  const extra = parseInt(prompt('কতদিন বাড়াবেন? (১–৬০)', '7'), 10);
-  if(extra === null || isNaN(extra)) return;
-  if(!extra || extra < 1) return toast('সঠিক দিন দিন','err');
-  if(extra > 60) return toast('সর্বোচ্চ ৬০ দিন','err');
-  const curEst = Number(j.estDays)||0;
-  if(curEst + extra > 60) return toast('মোট মেয়াদ ৬০ দিনের বেশি হবে না','err');
-  adminConfirm(extra + ' দিন বাড়াবেন?', () => {
-    j.estDays = curEst + extra;
-    const from = (j.expiresAt && j.expiresAt > Date.now()) ? j.expiresAt : Date.now();
-    j.expiresAt = from + (extra * 24 * 60 * 60 * 1000);
-    if(j.status !== 'Paused') j.status = 'Active';
-    syncJobPublicStatus(j).then(()=>{
-      save();
+  const st = j.status || 'Active';
+  if(st !== 'Completed' && st !== 'Expired'){
+    return toast('শুধু Completed বা Expired জব Delete করা যাবে। আগে Done করুন।','err');
+  }
+  adminConfirm('"' + (j.title||'Job') + '" জবটি মুছে ফেলবেন? এটা আর ফেরত আসবে না।', async () => {
+    try {
+      // Remove from public JOBS + Firestore
+      const pub = (typeof findPublicJob === 'function') ? findPublicJob(j) : null;
+      const docId = (pub && pub._docId) || j._docId || null;
+      if(docId && window.fbDeleteJob){
+        try { await window.fbDeleteJob(docId); } catch(e){ console.error(e); }
+      }
+      // Remove from in-memory public list
+      const pIdx = JOBS.findIndex(x => x === pub || x.id === j.id || String(x.id) === String(j.id));
+      if(pIdx >= 0) JOBS.splice(pIdx, 1);
+
+      // Remove from buyer's postedJobs
+      currentUser.postedJobs.splice(i, 1);
+      await save();
       renderMyJobs();
-      toast('মেয়াদ বাড়ানো হয়েছে');
-    });
+      if(typeof renderJobs === 'function') renderJobs();
+      if(typeof renderAdminJobs === 'function') renderAdminJobs();
+      if(typeof updateUI === 'function') updateUI();
+      toast('জব Delete করা হয়েছে');
+    } catch(e){
+      console.error(e);
+      toast('Delete ব্যর্থ','err');
+    }
   });
 }
 
-/** Auto-expire jobs past expiresAt */
+// Extend feature removed — job runs only for the days set at posting.
+function extendMyJob(i){
+  toast('Extend বন্ধ করা হয়েছে। জব শুধু পোস্ট করার সময়ের নির্ধারিত দিন পর্যন্ত চলবে।','err');
+}
+
+/** Auto-expire jobs past expiresAt + notify buyer before expiry */
 async function checkExpiredJobs(){
   if(!currentUser || !currentUser.postedJobs) return;
   let changed = false;
+  const now = Date.now();
+  const ONE_DAY = 24 * 60 * 60 * 1000;
+  const THREE_DAYS = 3 * ONE_DAY;
+
   for(const job of currentUser.postedJobs){
     if(!job) continue;
     if(job.status === 'Completed' || job.status === 'Expired') continue;
+
     let exp = job.expiresAt;
     if(!exp && job.createdAt && job.estDays){
       exp = Number(job.createdAt) + (Number(job.estDays) * 24 * 60 * 60 * 1000);
       job.expiresAt = exp;
     }
-    if(exp && Date.now() > exp){
+    if(!exp) continue;
+
+    const left = exp - now;
+
+    // Notify ~3 days before (once)
+    if(left > 0 && left <= THREE_DAYS && !job._notified3d){
+      job._notified3d = true;
+      currentUser.notices = currentUser.notices || [];
+      const expDate = new Date(exp).toLocaleDateString(undefined, { day:'2-digit', month:'short', year:'numeric' });
+      currentUser.notices.unshift({
+        id: Date.now() + Math.random(),
+        ts: now,
+        title: 'জব মেয়াদ শীঘ্রই শেষ',
+        body: '"' + (job.title || 'Job') + '" জবের মেয়াদ ' + expDate + ' তারিখে শেষ হবে (প্রায় ৩ দিন বাকি)।',
+        time: new Date().toLocaleString()
+      });
+      changed = true;
+    }
+
+    // Notify ~24 hours before (once)
+    if(left > 0 && left <= ONE_DAY && !job._notified1d){
+      job._notified1d = true;
+      currentUser.notices = currentUser.notices || [];
+      const expDate = new Date(exp).toLocaleDateString(undefined, { day:'2-digit', month:'short', year:'numeric' });
+      currentUser.notices.unshift({
+        id: Date.now() + Math.random(),
+        ts: now,
+        title: '⚠️ জব মেয়াদ আগামীকাল শেষ',
+        body: '"' + (job.title || 'Job') + '" জবের মেয়াদ আগামীকাল (' + expDate + ') শেষ হয়ে যাবে। প্রয়োজন হলে আগে Review/Done করুন।',
+        time: new Date().toLocaleString()
+      });
+      changed = true;
+    }
+
+    // Expire when time is over
+    if(left <= 0){
       await finalizeBuyerJob(job, 'Expired');
+      currentUser.notices = currentUser.notices || [];
+      currentUser.notices.unshift({
+        id: Date.now() + Math.random(),
+        ts: now,
+        title: 'জব Expired',
+        body: '"' + (job.title || 'Job') + '" জবের নির্ধারিত মেয়াদ শেষ হয়েছে। জবটি Expired করা হয়েছে।',
+        time: new Date().toLocaleString()
+      });
       changed = true;
     }
   }
+
   if(changed){
     await save();
     if(typeof renderMyJobs === 'function') renderMyJobs();
@@ -4402,6 +4497,98 @@ async function save(){
   }
 }
 
+
+/* ===== LIVE AUTO-REFRESH: Jobs + Settings + Content ===== */
+window._jobsUnsub = window._jobsUnsub || null;
+window._liveRefreshTimer = window._liveRefreshTimer || null;
+
+function applyJobsFromRemote(list){
+  const arr = list || [];
+  JOBS.length = 0;
+  arr.forEach(j => JOBS.push(j));
+  try {
+    if(typeof renderJobs === 'function') renderJobs();
+    if(typeof renderMyJobs === 'function' && currentUser && (currentUser.mode||'Worker')==='Buyer') renderMyJobs();
+    if(typeof renderAdminJobs === 'function') {
+      const ap = document.getElementById('adminPanel');
+      if(ap && !ap.classList.contains('hidden')) renderAdminJobs();
+    }
+    if(typeof loadAdminStats === 'function') {
+      const ap = document.getElementById('adminPanel');
+      if(ap && !ap.classList.contains('hidden')) loadAdminStats();
+    }
+  } catch(e){ console.error(e); }
+}
+
+function startJobsLiveListener(){
+  if(window._jobsUnsub){ try { window._jobsUnsub(); } catch(e){} window._jobsUnsub = null; }
+  if(window.fbListenJobs){
+    window._jobsUnsub = window.fbListenJobs((list) => {
+      applyJobsFromRemote(list);
+    });
+    return;
+  }
+  // Fallback: poll every 15s if realtime not available
+  if(window._jobsPollTimer) clearInterval(window._jobsPollTimer);
+  window._jobsPollTimer = setInterval(async ()=>{
+    try {
+      if(!window.fbLoadJobs) return;
+      const remote = await window.fbLoadJobs();
+      applyJobsFromRemote(remote || []);
+    } catch(e){}
+  }, 15000);
+}
+
+async function liveRefreshExtras(){
+  try {
+    // Settings (deposit numbers, unlock threshold)
+    if(window.fbLoadSettings){
+      const s = await window.fbLoadSettings();
+      if(s){
+        if(s.bkashNo) DEP_NUMBERS.bKash = s.bkashNo;
+        if(s.nagadNo) DEP_NUMBERS.Nagad = s.nagadNo;
+        if(s.unlockNeed) window._unlockNeed = s.unlockNeed;
+        if(typeof onDepMethodChange === 'function') onDepMethodChange();
+      }
+    }
+    // Site content / notices
+    if(window.fbLoadSiteContent){
+      await loadSiteContentFromFb();
+      if(typeof applySiteContent === 'function') applySiteContent();
+    }
+    // Rewards
+    if(window.fbLoadReward){
+      await loadRewardsFromFb();
+      if(typeof renderRewards === 'function'){
+        const rv = document.getElementById('view-rewards');
+        if(rv && !rv.classList.contains('hidden')) renderRewards();
+      }
+    }
+    // Current user profile (balance, notices, etc.)
+    if(currentUser && currentUser.authUid && window.fbLoadUser){
+      const fresh = await window.fbLoadUser(currentUser.authUid);
+      if(fresh){
+        // keep local mode if set
+        const mode = currentUser.mode;
+        Object.assign(currentUser, fresh);
+        if(mode) currentUser.mode = mode;
+        users[currentUser.authUid] = currentUser;
+        if(typeof updateUI === 'function') updateUI();
+        if(typeof updateNotifyBadge === 'function') updateNotifyBadge();
+      }
+    }
+  } catch(e){ console.error('liveRefreshExtras', e); }
+}
+
+function startSiteLiveRefresh(){
+  startJobsLiveListener();
+  if(window._liveRefreshTimer) clearInterval(window._liveRefreshTimer);
+  // Soft refresh settings/content/user every 20s — no full page reload
+  window._liveRefreshTimer = setInterval(()=>{ liveRefreshExtras(); }, 20000);
+  // First extras refresh shortly after boot
+  setTimeout(()=>{ liveRefreshExtras(); }, 3000);
+}
+
 document.addEventListener('DOMContentLoaded', async ()=>{
   /* dark theme session-only */
 
@@ -4444,6 +4631,8 @@ document.addEventListener('DOMContentLoaded', async ()=>{
   updateChatBadge();
   try { await loadSiteContentFromFb(); applySiteContent(); } catch(e){}
   try { await loadRewardsFromFb(); } catch(e){}
+  // Auto live refresh — jobs realtime + settings/content soft refresh
+  try { startSiteLiveRefresh(); } catch(e){ console.error(e); }
 });
 
 document.addEventListener('click',e=>{
@@ -4525,7 +4714,13 @@ async function initAdmin(){
       }
       if(window.fbLoadReports) _adminReportsCache = await window.fbLoadReports();
       if(window.fbLoadRewardClaims) _rewardClaimsCache = await window.fbLoadRewardClaims();
+      if(window.fbLoadJobs){
+        const remoteJobs = await window.fbLoadJobs();
+        applyJobsFromRemote(remoteJobs || []);
+      }
       loadAdminStats();
+      const jobsPanel = document.getElementById('admin-jobs');
+      if(jobsPanel && !jobsPanel.classList.contains('hidden')) renderAdminJobs();
     } catch(e){}
   }, 20000);
 }
@@ -4646,7 +4841,7 @@ function loadAdminStats(){
   set('admStatPendingDep', pendingDep);
   set('admStatPendingWd', pendingWd);
   set('admStatPendingVer', pendingVer);
-  set('admStatJobs', JOBS.length);
+  set('admStatJobs', JOBS.filter(j => (j.status||'Active')==='Active').length);
   set('admStatEarned', '৳'+totalEarned.toFixed(0));
   set('admStatDeposit', '৳'+totalDep.toFixed(0));
 
@@ -5039,10 +5234,19 @@ function adminApproveWd(uid, idx){
   const u = users[uid]; if(!u || !u.withdraws || !u.withdraws[idx]) return;
   const w = u.withdraws[idx];
   if(w.status !== 'Pending') return;
+  // Balance already deducted at submit — keep it (no refund)
   w.status = 'Accepted';
+  w.paidAt = Date.now();
   u.notices = u.notices||[];
-  u.notices.unshift({id:Date.now(), title:'Withdraw Approved', body:'আপনার উইথড্র Approve হয়েছে। ৳'+(w.amount||0)+' পাঠানো হবে।', time:'Just now'});
-if(window.fbSaveUser && u.authUid) window.fbSaveUser(u);
+  u.notices.unshift({
+    id: Date.now(),
+    title: 'Withdraw Approved',
+    body: 'আপনার উইথড্র Approve হয়েছে। ৳' + (w.amount||0) + ' পাঠানো হবে। (কাটা টাকা ফেরত যাবে না)',
+    time: 'Just now'
+  });
+  if(window.fbSaveUser && u.authUid) window.fbSaveUser(u);
+  if(u.userId) users[u.userId] = u;
+  if(u.authUid) users[u.authUid] = u;
   renderAdminWithdraws();
   loadAdminStats();
   toast('Withdraw Approved');
@@ -5051,14 +5255,28 @@ function adminRejectWd(uid, idx){
   const u = users[uid]; if(!u || !u.withdraws || !u.withdraws[idx]) return;
   const w = u.withdraws[idx];
   if(w.status !== 'Pending') return;
+  // Refund exact amount that was held at submit time
+  const refundAmt = Number(w.deducted);
+  const safeRefund = (!isNaN(refundAmt) && refundAmt > 0)
+    ? refundAmt
+    : (Number(w.amount)||0) + (Number(w.fee)||0);
   w.status = 'Rejected';
-  u.earned = (u.earned||0) + (w.deducted||0);
+  w.refundedAt = Date.now();
+  w.refundAmount = safeRefund;
+  u.earned = (u.earned||0) + safeRefund;
   u.notices = u.notices||[];
-  u.notices.unshift({id:Date.now(), title:'Withdraw Rejected', body:'উইথড্র Reject। টাকা ব্যালেন্সে ফেরত দেওয়া হয়েছে।', time:'Just now'});
-if(window.fbSaveUser && u.authUid) window.fbSaveUser(u);
+  u.notices.unshift({
+    id: Date.now(),
+    title: 'Withdraw Rejected',
+    body: 'উইথড্র Reject হয়েছে। ৳' + safeRefund.toFixed(2) + ' Earning ব্যালেন্সে ফেরত দেওয়া হয়েছে।',
+    time: 'Just now'
+  });
+  if(window.fbSaveUser && u.authUid) window.fbSaveUser(u);
+  if(u.userId) users[u.userId] = u;
+  if(u.authUid) users[u.authUid] = u;
   renderAdminWithdraws();
   loadAdminStats();
-  toast('Withdraw Rejected + Refunded');
+  toast('Withdraw Rejected + ৳' + safeRefund.toFixed(2) + ' Refunded');
 }
 
 function renderAdminVerifications(){
@@ -5119,15 +5337,15 @@ if(window.fbSaveUser && u.authUid) window.fbSaveUser(u);
 function renderAdminJobs(){
   const el = document.getElementById('adminJobsList');
   if(!el) return;
-  let list = JOBS.slice();
+  // Admin: only RUNNING (Active) jobs — Paused / Completed / Expired hidden
+  let list = JOBS.filter(j => (j.status || 'Active') === 'Active');
   // Pinned first
   list.sort((a,b) => (b.pinned?1:0) - (a.pinned?1:0));
   const q = (document.getElementById('adminSearchJobs')?.value||'').trim().toLowerCase();
   if(q) list = list.filter(j => JSON.stringify(j).toLowerCase().includes(q));
-  if(!list.length){ el.innerHTML='<p class="text-slate-400 text-center py-8">No jobs</p>'; return; }
-  el.innerHTML = list.map((j,i)=>{
+  if(!list.length){ el.innerHTML='<p class="text-slate-400 text-center py-8">No running jobs</p>'; return; }
+  el.innerHTML = list.map((j)=>{
     const realIdx = JOBS.indexOf(j);
-    i = realIdx >= 0 ? realIdx : i;
     const pinLabel = j.pinned ? 'Unpin' : 'Pin';
     const pinCls = j.pinned ? 'bg-amber-100 text-amber-800' : 'bg-blue-100 text-blue-700';
     const pinBadge = j.pinned ? '<span class="text-[10px] bg-amber-100 text-amber-700 px-2 py-0.5 rounded-full font-bold ml-1">PINNED</span>' : '';
@@ -5137,9 +5355,10 @@ function renderAdminJobs(){
         <span class="text-green-600 font-bold">৳${Number(j.price).toFixed(2)}</span>
       </div>
       <p class="text-xs text-slate-500 mb-2">${j.done||0}/${j.total||0} • ${j.category||''} • ${j.zone||''} • Owner: ${j.ownerId||'System'}</p>
+      <span class="text-[10px] font-bold px-2 py-0.5 rounded-full bg-green-100 text-green-700 mb-2 inline-block">Active / Running</span>
       <div class="flex gap-2">
-        <button onclick="adminConfirm('এই Job Delete করবেন?',()=>adminDeleteJob(${i}))" class="text-[11px] px-3 py-1.5 rounded-lg font-semibold bg-red-100 text-red-600">Delete</button>
-        <button onclick="adminTogglePinJob(${i})" class="text-[11px] px-3 py-1.5 rounded-lg font-semibold ${pinCls}"><i class="fa-solid fa-thumbtack"></i> ${pinLabel}</button>
+        <button onclick="adminConfirm('এই Job Delete করবেন?',()=>adminDeleteJob(${realIdx}))" class="text-[11px] px-3 py-1.5 rounded-lg font-semibold bg-red-100 text-red-600">Delete</button>
+        <button onclick="adminTogglePinJob(${realIdx})" class="text-[11px] px-3 py-1.5 rounded-lg font-semibold ${pinCls}"><i class="fa-solid fa-thumbtack"></i> ${pinLabel}</button>
       </div>
     </div>`;
   }).join('');
@@ -5150,9 +5369,10 @@ async function adminDeleteJob(i){
   if(j && j._docId && window.fbDeleteJob) {
     try { await window.fbDeleteJob(j._docId); } catch(e){ console.error(e); }
   }
-  JOBS.splice(i,1);
+  if(i >= 0) JOBS.splice(i,1);
   renderAdminJobs();
   loadAdminStats();
+  if(typeof renderJobs === 'function') renderJobs();
   toast('Job deleted');
 }
 async function adminTogglePinJob(i){
@@ -6531,6 +6751,20 @@ Support: Live Chat inside the app</textarea>
     } catch (e) {
       console.error("fbLoadJobs", e);
       return [];
+    }
+  };
+
+  // Real-time jobs listener — admin pin/delete/status changes push to all clients
+  window.fbListenJobs = function(callback) {
+    try {
+      return onSnapshot(collection(db, "jobs"), (snap) => {
+        const list = [];
+        snap.forEach(d => list.push({ ...d.data(), id: d.data().id || d.id, _docId: d.id }));
+        callback(list);
+      }, (err) => console.error("jobs listen", err));
+    } catch (e) {
+      console.error(e);
+      return () => {};
     }
   };
 
