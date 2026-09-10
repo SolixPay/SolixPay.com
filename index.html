@@ -33,10 +33,12 @@ function getUserChatKey(){
 function renderUserChatMessages(msgs){
   const box = document.getElementById('chatMessages');
   if(!box) return;
+  const agentAvatar = `<div class="w-8 h-8 rounded-xl bg-slate-900 text-white flex items-center justify-center flex-shrink-0 shadow"><i class="fa-solid fa-headset text-sm"></i></div>`;
   const welcome = `<div class="flex gap-3">
-    <div class="w-8 h-8 rounded-xl bg-slate-900 text-white text-sm flex items-center justify-center flex-shrink-0 font-bold shadow">A</div>
+    ${agentAvatar}
     <div class="bg-white rounded-2xl rounded-tl-sm px-4 py-3 text-sm shadow-xs max-w-[85%] text-slate-900 font-medium border border-slate-200">
-      হ্যালো! SolixPay সাপোর্টে স্বাগতম। কীভাবে সাহায্য করতে পারি?
+      <p class="text-[11px] font-bold text-slate-500 mb-1">SolixPay Support agent</p>
+      <p>হ্যালো! SolixPay সাপোর্টে স্বাগতম। কীভাবে সাহায্য করতে পারি?</p>
     </div>
   </div>`;
   if(!msgs || !msgs.length){
@@ -49,8 +51,9 @@ function renderUserChatMessages(msgs){
     const time = m.time || (typeof formatChatTime === 'function' ? formatChatTime(m.ts) : '') || '';
     if(m.fromAdmin){
       html += `<div class="flex gap-2">
-        <div class="w-7 h-7 rounded-full bg-slate-900 text-white text-xs flex items-center justify-center flex-shrink-0">A</div>
+        ${agentAvatar}
         <div class="bg-white rounded-2xl rounded-tl-sm px-3 py-2 text-sm shadow-sm max-w-[80%] border border-slate-200">
+          <p class="text-[11px] font-bold text-slate-500 mb-0.5">SolixPay Support agent</p>
           <p class="whitespace-pre-wrap">${text}</p>
           <p class="text-[10px] text-slate-400 mt-1">${time}</p>
         </div>
@@ -68,8 +71,25 @@ function renderUserChatMessages(msgs){
   box.scrollTop = box.scrollHeight;
 }
 
+const CHAT_MAX_AGE_MS = 30 * 24 * 60 * 60 * 1000; // 1 month — silent system purge
+function isChatExpired(m){
+  const ts = Number(m && m.ts) || 0;
+  return ts > 0 && (Date.now() - ts) > CHAT_MAX_AGE_MS;
+}
+function filterFreshChats(list){
+  return (list || []).filter(m => !isChatExpired(m));
+}
+async function purgeExpiredChats(list){
+  const old = (list || []).filter(isChatExpired);
+  if(!old.length || !window.fbDeleteChat) return;
+  for(const m of old){
+    if(m._docId){
+      try { await window.fbDeleteChat(m._docId); } catch(e){}
+    }
+  }
+}
 function filterThreadMsgs(list, key){
-  return (list || []).filter(m => {
+  return filterFreshChats(list || []).filter(m => {
     const k = m.threadId || (m.fromAdmin ? m.to : m.fromId);
     return k === key;
   }).sort((a,b) => (a.ts||0) - (b.ts||0));
@@ -166,7 +186,7 @@ async function sendChat(){
     const autoTime = formatChatTime(autoTs);
     const auto = {
       fromId: 'admin',
-      fromName: 'Support',
+      fromName: 'SolixPay Support agent',
       to: key,
       threadId: key,
       text: 'অপেক্ষা করুন, Agent এর সাথে কানেক্ট করা হচ্ছে...',
@@ -179,7 +199,7 @@ async function sendChat(){
     try {
       if(window.fbAddChat) await window.fbAddChat(auto);
       else if(box){
-        box.innerHTML += `<div class="flex gap-2"><div class="w-7 h-7 rounded-full bg-slate-900 text-white text-xs flex items-center justify-center flex-shrink-0">A</div><div class="bg-white rounded-2xl rounded-tl-sm px-3 py-2 text-sm shadow-sm max-w-[80%] border border-slate-200"><p class="whitespace-pre-wrap">${auto.text}</p><p class="text-[10px] text-slate-400 mt-1">${autoTime}</p></div></div>`;
+        box.innerHTML += `<div class="flex gap-2"><div class="w-8 h-8 rounded-xl bg-slate-900 text-white flex items-center justify-center flex-shrink-0 shadow"><i class="fa-solid fa-headset text-sm"></i></div><div class="bg-white rounded-2xl rounded-tl-sm px-3 py-2 text-sm shadow-sm max-w-[80%] border border-slate-200"><p class="text-[11px] font-bold text-slate-500 mb-0.5">SolixPay Support agent</p><p class="whitespace-pre-wrap">${auto.text}</p><p class="text-[10px] text-slate-400 mt-1">${autoTime}</p></div></div>`;
         box.scrollTop = box.scrollHeight;
       }
     } catch(e){ console.error(e); }
@@ -4333,14 +4353,22 @@ function loadAdminStats(){
     if(el) el.classList.toggle('hidden', !show);
   };
   // Red badge only for UNSEEN new work (clears when admin opens that section; new work brings it back)
-  showBadge('badge-deposits', hasUnseenAdminItems('deposits', depItems));
-  showBadge('badge-withdraws', hasUnseenAdminItems('withdraws', wdItems));
-  showBadge('badge-verifications', hasUnseenAdminItems('verifications', verItems));
-  showBadge('badge-suspended', hasUnseenAdminItems('suspended', susItems));
-  showBadge('badge-ads', hasUnseenAdminItems('ads', adItems));
-  showBadge('badge-rewards', hasUnseenAdminItems('rewards', rewardItems));
-  showBadge('badge-chat', hasUnseenAdminItems('chat', chatItems));
-  showBadge('badge-reports', hasUnseenAdminItems('reports', reportItems));
+  const flagDep = hasUnseenAdminItems('deposits', depItems);
+  const flagWd = hasUnseenAdminItems('withdraws', wdItems);
+  const flagVer = hasUnseenAdminItems('verifications', verItems);
+  const flagSus = hasUnseenAdminItems('suspended', susItems);
+  const flagAds = hasUnseenAdminItems('ads', adItems);
+  const flagRew = hasUnseenAdminItems('rewards', rewardItems);
+  const flagChat = hasUnseenAdminItems('chat', chatItems);
+  const flagRep = hasUnseenAdminItems('reports', reportItems);
+  showBadge('badge-deposits', flagDep);
+  showBadge('badge-withdraws', flagWd);
+  showBadge('badge-verifications', flagVer);
+  showBadge('badge-suspended', flagSus);
+  showBadge('badge-ads', flagAds);
+  showBadge('badge-rewards', flagRew);
+  showBadge('badge-chat', flagChat);
+  showBadge('badge-reports', flagRep);
   // Jobs: buyer new post (adminUnread) or job created after last view
   const seenJobs = Number(_adminSectionSeen.jobs || 0);
   const unseenJobs = (JOBS||[]).filter(j => {
@@ -4349,8 +4377,20 @@ function loadAdminStats(){
     const t = adminItemTs(j);
     return seenJobs > 0 && t > seenJobs;
   });
-  showBadge('badge-jobs', unseenJobs.length > 0);
+  const flagJobs = unseenJobs.length > 0;
+  showBadge('badge-jobs', flagJobs);
   showBadge('badge-users', false);
+  // Same red badges on Overview Quick Actions
+  showBadge('qa-badge-deposits', flagDep);
+  showBadge('qa-badge-withdraws', flagWd);
+  showBadge('qa-badge-verifications', flagVer);
+  showBadge('qa-badge-suspended', flagSus);
+  showBadge('qa-badge-ads', flagAds);
+  showBadge('qa-badge-rewards', flagRew);
+  showBadge('qa-badge-chat', flagChat);
+  showBadge('qa-badge-reports', flagRep);
+  showBadge('qa-badge-jobs', flagJobs);
+  showBadge('qa-badge-users', false);
 }
 
 async function loadAllUsersCache(){
@@ -5225,7 +5265,7 @@ async function adminReplyInThread(){
   const replyTs = Date.now();
   const payload = {
     fromId: 'admin',
-    fromName: 'Admin',
+    fromName: 'SolixPay Support agent',
     to: _adminActiveThread,
     threadId: _adminActiveThread,
     text: textMsg,
@@ -5569,10 +5609,19 @@ function openSitePage(key){
       <div class="bg-white rounded-2xl p-4 border border-slate-200 shadow-sm">
         <p class="text-sm font-semibold text-slate-700 mb-2">Quick Actions</p>
         <div class="flex flex-wrap gap-2">
-          <button onclick="adminGo('deposits')" class="bg-amber-500 text-white text-xs font-bold px-4 py-2 rounded-xl">Review Deposits</button>
-          <button onclick="adminGo('withdraws')" class="bg-orange-500 text-white text-xs font-bold px-4 py-2 rounded-xl">Review Withdraws</button>
-          <button onclick="adminGo('verifications')" class="bg-blue-500 text-white text-xs font-bold px-4 py-2 rounded-xl">Review Verifies</button>
-          <button onclick="adminGo('users')" class="bg-slate-800 text-white text-xs font-bold px-4 py-2 rounded-xl">Manage Users</button>
+          <button onclick="adminGo('users')" class="relative bg-slate-800 text-white text-xs font-bold px-4 py-2 rounded-xl">Users<span id="qa-badge-users" class="hidden absolute -top-1 -right-1 w-2.5 h-2.5 bg-red-500 rounded-full ring-2 ring-white"></span></button>
+          <button onclick="adminGo('suspended')" class="relative bg-red-600 text-white text-xs font-bold px-4 py-2 rounded-xl">Suspended<span id="qa-badge-suspended" class="hidden absolute -top-1 -right-1 w-2.5 h-2.5 bg-red-500 rounded-full ring-2 ring-white"></span></button>
+          <button onclick="adminGo('deposits')" class="relative bg-amber-500 text-white text-xs font-bold px-4 py-2 rounded-xl">Deposits<span id="qa-badge-deposits" class="hidden absolute -top-1 -right-1 w-2.5 h-2.5 bg-red-500 rounded-full ring-2 ring-white"></span></button>
+          <button onclick="adminGo('withdraws')" class="relative bg-orange-500 text-white text-xs font-bold px-4 py-2 rounded-xl">Withdraws<span id="qa-badge-withdraws" class="hidden absolute -top-1 -right-1 w-2.5 h-2.5 bg-red-500 rounded-full ring-2 ring-white"></span></button>
+          <button onclick="adminGo('verifications')" class="relative bg-blue-500 text-white text-xs font-bold px-4 py-2 rounded-xl">Verify<span id="qa-badge-verifications" class="hidden absolute -top-1 -right-1 w-2.5 h-2.5 bg-red-500 rounded-full ring-2 ring-white"></span></button>
+          <button onclick="adminGo('jobs')" class="relative bg-emerald-600 text-white text-xs font-bold px-4 py-2 rounded-xl">Jobs<span id="qa-badge-jobs" class="hidden absolute -top-1 -right-1 w-2.5 h-2.5 bg-red-500 rounded-full ring-2 ring-white"></span></button>
+          <button onclick="adminGo('reports')" class="relative bg-purple-600 text-white text-xs font-bold px-4 py-2 rounded-xl">Reports<span id="qa-badge-reports" class="hidden absolute -top-1 -right-1 w-2.5 h-2.5 bg-red-500 rounded-full ring-2 ring-white"></span></button>
+          <button onclick="adminGo('ads')" class="relative bg-indigo-600 text-white text-xs font-bold px-4 py-2 rounded-xl">Ads<span id="qa-badge-ads" class="hidden absolute -top-1 -right-1 w-2.5 h-2.5 bg-red-500 rounded-full ring-2 ring-white"></span></button>
+          <button onclick="adminGo('chat')" class="relative bg-teal-600 text-white text-xs font-bold px-4 py-2 rounded-xl">Live Chat<span id="qa-badge-chat" class="hidden absolute -top-1 -right-1 w-2.5 h-2.5 bg-red-500 rounded-full ring-2 ring-white"></span></button>
+          <button onclick="adminGo('notices')" class="relative bg-slate-600 text-white text-xs font-bold px-4 py-2 rounded-xl">Notices</button>
+          <button onclick="adminGo('rewards')" class="relative bg-green-600 text-white text-xs font-bold px-4 py-2 rounded-xl">Rewards<span id="qa-badge-rewards" class="hidden absolute -top-1 -right-1 w-2.5 h-2.5 bg-red-500 rounded-full ring-2 ring-white"></span></button>
+          <button onclick="adminGo('content')" class="relative bg-cyan-700 text-white text-xs font-bold px-4 py-2 rounded-xl">Site Content</button>
+          <button onclick="adminGo('settings')" class="relative bg-slate-900 text-white text-xs font-bold px-4 py-2 rounded-xl">Settings</button>
         </div>
       </div>
     </div>
@@ -6093,7 +6142,19 @@ Support: Live Chat inside the app</textarea>
       const snap = await getDocs(q);
       const list = [];
       snap.forEach(d => list.push({ ...d.data(), _docId: d.id }));
-      return list;
+      const cutoff = Date.now() - (30 * 24 * 60 * 60 * 1000);
+      try {
+        for (const m of list) {
+          if ((m.ts || 0) > 0 && (m.ts || 0) < cutoff && m._docId) {
+            try { await deleteDoc(doc(db, "chats", m._docId)); } catch(e){}
+          }
+        }
+      } catch(e){}
+      return list.filter(m => {
+        const ts = m.ts || 0;
+        if (!ts) return true;
+        return ts >= cutoff;
+      });
     } catch (e) {
       console.error("fbLoadChats", e);
       return [];
@@ -6104,12 +6165,21 @@ Support: Live Chat inside the app</textarea>
     try {
       const snap = await getDocs(collection(db, "chats"));
       const list = [];
+      const cutoff = Date.now() - (30 * 24 * 60 * 60 * 1000);
       snap.forEach(d => {
         const m = { ...d.data(), _docId: d.id };
         if (m.fromId === userKey || m.to === userKey || m.threadId === userKey) list.push(m);
       });
-      list.sort((a,b) => (a.ts||0) - (b.ts||0));
-      return list;
+      for (const m of list) {
+        if ((m.ts || 0) > 0 && (m.ts || 0) < cutoff && m._docId) {
+          try { await deleteDoc(doc(db, "chats", m._docId)); } catch(e){}
+        }
+      }
+      return list.filter(m => {
+        const ts = m.ts || 0;
+        if (!ts) return true;
+        return ts >= cutoff;
+      }).sort((a,b) => (a.ts||0) - (b.ts||0));
     } catch (e) {
       console.error(e);
       return [];
@@ -6131,8 +6201,18 @@ Support: Live Chat inside the app</textarea>
       const q = query(collection(db, "chats"), orderBy("ts", "desc"), limit(300));
       return onSnapshot(q, (snap) => {
         const list = [];
+        const cutoff = Date.now() - (30 * 24 * 60 * 60 * 1000);
         snap.forEach(d => list.push({ ...d.data(), _docId: d.id }));
-        callback(list);
+        list.forEach(m => {
+          if ((m.ts || 0) > 0 && (m.ts || 0) < cutoff && m._docId) {
+            deleteDoc(doc(db, "chats", m._docId)).catch(()=>{});
+          }
+        });
+        callback(list.filter(m => {
+          const ts = m.ts || 0;
+          if (!ts) return true;
+          return ts >= cutoff;
+        }));
       }, (err) => console.error("chat listen", err));
     } catch (e) {
       console.error(e);
