@@ -1822,7 +1822,7 @@ body.dark-theme .side-item:hover,body.dark-theme .side-item.active{background:#0
         <a href="#" onclick="goView('mywork')" class="side-item pl-5"><i class="fa-solid fa-list icon"></i> My Task</a>
         <a href="#" onclick="goView('accepted')" class="side-item pl-5"><i class="fa-solid fa-check icon"></i> Accepted Task</a>
       </div>
-      <a href="#" id="sideMyJobs" onclick="goView('myjobs')" class="side-item"><i class="fa-solid fa-briefcase icon"></i> My Jobs</a>
+      <a href="#" id="sideMyJobs" onclick="goView('myjobs')" class="side-item relative"><i class="fa-solid fa-briefcase icon"></i> My Jobs<span id="sideMyJobsBadge" class="hidden ml-auto w-2 h-2 bg-red-500 rounded-full"></span></a>
       <a href="#" onclick="toggleNotifyView()" class="side-item relative"><i class="fa-solid fa-bell icon"></i> Notifications<span id="sideNotifyBadge" class="hidden ml-auto w-2 h-2 bg-red-500 rounded-full"></span></a>
       <a href="#" onclick="goView('deposit')" class="side-item"><i class="fa-solid fa-credit-card icon"></i> Deposit</a>
       <a href="#" onclick="goView('wallet')" class="side-item"><i class="fa-solid fa-wallet icon"></i> Wallet</a>
@@ -2109,6 +2109,20 @@ function updateChatBadge(){
   const b2 = document.getElementById('chatBadgeLand');
   if(b1) b1.classList.toggle('hidden', !chatUnread);
   if(b2) b2.classList.toggle('hidden', !chatUnread);
+}
+/** Buyer: red dot on My Jobs if any pending submissions to review */
+function updateMyJobsBadge(){
+  const el = document.getElementById('sideMyJobsBadge');
+  if(!el) return;
+  let pending = 0;
+  if(currentUser && Array.isArray(currentUser.postedJobs)){
+    currentUser.postedJobs.forEach(j => {
+      (j.submissions || []).forEach(s => {
+        if((s.status || 'Pending') === 'Pending') pending++;
+      });
+    });
+  }
+  el.classList.toggle('hidden', pending === 0);
 }
 function markNotifySeen(){
   siteNotices.forEach(n => n.unread = false);
@@ -2435,20 +2449,40 @@ function initDash(){
   // Auto-approve pending submissions older than 3 days (for buyers)
   checkAutoApproveSubmissions().catch(()=>{});
   if(typeof checkExpiredJobs==='function') checkExpiredJobs().catch(()=>{});
-  // Restore last page, or default by mode
-  let lastView = null;
-  try { lastView = window._lastView || null; } catch(e){}
-  if(currentUser && (currentUser.mode||'Worker')==='Buyer'){
-    // Buyer: never restore jobs/jobdetail
-    if(lastView === 'jobs' || lastView === 'jobdetail') lastView = 'myjobs';
-    goView(lastView || 'myjobs');
+  // Suspended: only profile + appeal, everything else locked
+  if(currentUser && currentUser.banned){
+    goView('profile');
+    applySuspendedLock();
   } else {
-    goView(lastView || 'jobs');
+    let lastView = null;
+    try { lastView = window._lastView || null; } catch(e){}
+    if(currentUser && (currentUser.mode||'Worker')==='Buyer'){
+      if(lastView === 'jobs' || lastView === 'jobdetail') lastView = 'myjobs';
+      goView(lastView || 'myjobs');
+    } else {
+      goView(lastView || 'jobs');
+    }
   }
   updateNotifyBadge();
   updateChatBadge();
-  // Listen for admin Live Support replies (badge + chat, no notice)
   startUserChatListener();
+}
+
+/** Suspended user: lock all features except Profile + Appeal */
+function applySuspendedLock(){
+  if(!currentUser || !currentUser.banned) return;
+  // Hide side menu items except profile
+  document.querySelectorAll('#sideBar .side-item').forEach(el => {
+    const onclick = el.getAttribute('onclick') || '';
+    if(onclick.includes("goView('profile')") || onclick.includes('doLogout') || onclick.includes('profile')){
+      el.classList.remove('hidden');
+    } else {
+      el.classList.add('opacity-40', 'pointer-events-none');
+    }
+  });
+  // Overlay lock on non-profile views handled in goView
+  updateAppealUI();
+  toast('অ্যাকাউন্ট Suspended — শুধু Appeal দিতে পারবেন','err');
 }
 
 function startUserChatListener(){
@@ -2660,12 +2694,21 @@ function updateUI(){
       : '<p class="text-slate-400">No history yet</p>';
   }
   applyModeUI();
+  updateMyJobsBadge();
+  updateNotifyBadge();
+  updateChatBadge();
 }
 
 function goView(v){
   // Always close sidebar (don't toggle) so header/profile clicks don't open it
   document.getElementById('sideBar').classList.add('hidden');
   document.getElementById('profMenu').classList.add('hidden');
+
+  // Suspended: only profile allowed
+  if(currentUser && currentUser.banned && v !== 'profile'){
+    v = 'profile';
+    toast('Suspended অ্যাকাউন্টে শুধু Appeal করা যায়','err');
+  }
 
   // Buyer mode: block jobs & jobdetail
   if(currentUser && (currentUser.mode||'Worker')==='Buyer' && (v==='jobs' || v==='jobdetail')){
@@ -3721,9 +3764,41 @@ function rejectSubmission(si){
   if(!job || !job.submissions || !job.submissions[si]) return;
   const sub = job.submissions[si];
   if(sub.status !== 'Pending') return toast('Already reviewed','err');
-  const reason = prompt('Reject কারণ (optional):') || '';
+  openRejectReasonModal(si);
+}
+
+function openRejectReasonModal(si){
+  const old = document.getElementById('rejectReasonModal');
+  if(old) old.remove();
+  const html = `<div id="rejectReasonModal" class="fixed inset-0 z-[85] flex items-center justify-center p-4">
+    <div class="absolute inset-0 bg-black/50" onclick="document.getElementById('rejectReasonModal').remove()"></div>
+    <div class="relative bg-white rounded-3xl shadow-2xl w-full max-w-sm p-5 z-10">
+      <h3 class="font-bold text-lg text-slate-900 mb-1">প্রুফ Reject করুন</h3>
+      <p class="text-xs text-slate-500 mb-3">কারণ লেখা optional — চাইলে ফাঁকা রাখতে পারেন</p>
+      <textarea id="rejectReasonInput" class="w-full border-2 border-slate-200 rounded-xl px-4 py-3 text-sm focus:outline-none focus:border-red-400 resize-none h-24 mb-4" placeholder="Reject কারণ লিখুন (optional)..." maxlength="300"></textarea>
+      <div class="flex gap-2">
+        <button type="button" onclick="document.getElementById('rejectReasonModal').remove()" class="flex-1 py-2.5 rounded-xl bg-slate-100 text-slate-700 font-semibold text-sm">বাতিল</button>
+        <button type="button" id="rejectReasonOkBtn" class="flex-1 py-2.5 rounded-xl bg-red-500 hover:bg-red-600 text-white font-bold text-sm">Reject</button>
+      </div>
+    </div>
+  </div>`;
+  document.body.insertAdjacentHTML('beforeend', html);
+  document.getElementById('rejectReasonInput')?.focus();
+  document.getElementById('rejectReasonOkBtn').onclick = function(){
+    const reason = (document.getElementById('rejectReasonInput')?.value || '').trim();
+    document.getElementById('rejectReasonModal')?.remove();
+    doRejectSubmission(si, reason);
+  };
+}
+
+function doRejectSubmission(si, reason){
+  if(reviewJobIndex < 0 || !currentUser) return;
+  const job = currentUser.postedJobs[reviewJobIndex];
+  if(!job || !job.submissions || !job.submissions[si]) return;
+  const sub = job.submissions[si];
+  if(sub.status !== 'Pending') return toast('Already reviewed','err');
   sub.status = 'Rejected';
-  sub.rejectReason = reason;
+  sub.rejectReason = reason || '';
 
   const worker = users[sub.workerId];
   if(worker){
@@ -3731,11 +3806,13 @@ function rejectSubmission(si){
     const task = worker.tasks.find(t => t.id === sub.id);
     if(task){ task.status = 'Rejected'; }
     worker.notices = worker.notices || [];
-    worker.notices.unshift({id:Date.now(), title:'Proof Rejected', body:'আপনার "'+job.title+'" জবের প্রুফ Reject হয়েছে।'+(reason?' কারণ: '+reason:''), time:'Just now'});
+    worker.notices.unshift({id:Date.now(), ts:Date.now(), title:'Proof Rejected', body:'আপনার "'+job.title+'" জবের প্রুফ Reject হয়েছে।'+(reason?' কারণ: '+reason:''), time:new Date().toLocaleString()});
+    if(window.fbSaveUser && worker.authUid) window.fbSaveUser(worker).catch(()=>{});
   }
-save();
+  save();
   renderJobReviews();
   renderMyJobs();
+  if(typeof updateMyJobsBadge === 'function') updateMyJobsBadge();
   toast('Submission Rejected');
 }
 
@@ -4501,6 +4578,19 @@ function cleanUserOldData(u){
       }
     });
   }
+  // Old appeals (resolved or >1 month) — clear appeal text, keep suspendCount
+  if(u.appealStatus && u.appealStatus !== 'pending'){
+    if(u.appealTs && isOlderThanOneMonth({ ts: u.appealTs })){
+      u.appealText = null;
+      u.appealDate = null;
+      u.appealTs = null;
+      // keep appealStatus as approved/rejected history lightly, or clear
+      changed = true;
+    }
+  } else if(u.appealStatus === 'pending' && u.appealTs && isOlderThanOneMonth({ ts: u.appealTs })){
+    // pending but older than 1 month — still keep for admin, but could auto-expire
+    // leave pending for admin action
+  }
   return changed;
 }
 
@@ -4571,6 +4661,7 @@ async function submitAppeal(){
   currentUser.appealStatus = 'pending';
   currentUser.appealText = text;
   currentUser.appealDate = new Date().toISOString();
+  currentUser.appealTs = Date.now();
   await save();
   updateAppealUI();
   toast('Appeal সাবমিট হয়েছে। Admin review করবে।');
@@ -4794,13 +4885,11 @@ document.addEventListener('DOMContentLoaded', async ()=>{
         remoteJobs.forEach(j => JOBS.push(j));
       }
     } catch(e) {}
-    if(currentUser.banned){
-      currentUser = null;
-      showLanding();
-    } else if(currentUser.role === 'admin') {
+    if(currentUser.role === 'admin') {
       initAdmin();
     } else {
       initDash();
+      if(currentUser.banned) applySuspendedLock();
     }
   } else {
     showLanding();
@@ -4942,7 +5031,7 @@ function hasUnseenAdminItems(section, items){
 }
 
 function adminGo(view){
-  const views = ['overview','users','suspended','deposits','withdraws','verifications','jobs','reports','ads','chat','rewards','notices','content','settings'];
+  const views = ['overview','users','suspended','appeals','deposits','withdraws','verifications','jobs','reports','ads','chat','rewards','notices','content','settings'];
   views.forEach(v=>{
     const el = document.getElementById('admin-'+v);
     if(el) el.classList.toggle('hidden', v !== view);
@@ -4957,11 +5046,12 @@ function adminGo(view){
     active.classList.add('bg-green-600','text-white');
   }
   // Opening a section clears its red badge (until new work arrives)
-  const badgeSections = ['suspended','deposits','withdraws','verifications','jobs','reports','ads','chat','rewards'];
+  const badgeSections = ['suspended','appeals','deposits','withdraws','verifications','jobs','reports','ads','chat','rewards'];
   if(badgeSections.includes(view)) markAdminSectionSeen(view);
 
   if(view==='users') renderAdminUsers();
   if(view==='suspended') renderAdminSuspended();
+  if(view==='appeals') renderAdminAppeals();
   if(view==='deposits') renderAdminDeposits();
   if(view==='withdraws') renderAdminWithdraws();
   if(view==='verifications') renderAdminVerifications();
@@ -4983,7 +5073,7 @@ function loadAdminStats(){
   let totalUsers = Object.keys(users).length;
   let pendingDep = 0, pendingWd = 0, pendingVer = 0, totalEarned = 0, totalDep = 0;
   let suspendedCount = 0, pendingAds = 0, pendingRewards = 0;
-  const depItems = [], wdItems = [], verItems = [], susItems = [], adItems = [];
+  const depItems = [], wdItems = [], verItems = [], susItems = [], adItems = [], appealItems = [];
   Object.values(users).forEach(u=>{
     totalEarned += (u.earned||0);
     totalDep += (u.deposited||0);
@@ -4996,6 +5086,9 @@ function loadAdminStats(){
     if(u.banned && !u.permanentBan){
       suspendedCount++;
       susItems.push({ banDate: u.banDate, ts: u.banTs || adminItemTs({ banDate: u.banDate, time: u.banDate }) });
+    }
+    if(u.appealStatus === 'pending' && !u.permanentBan){
+      appealItems.push({ ts: u.appealTs || adminItemTs({ time: u.appealDate, date: u.appealDate }), appealDate: u.appealDate });
     }
     (u.ads||[]).forEach(a=>{ if(a.status==='Pending'){ pendingAds++; adItems.push(a); } });
   });
@@ -5032,6 +5125,7 @@ function loadAdminStats(){
   const flagWd = hasUnseenAdminItems('withdraws', wdItems);
   const flagVer = hasUnseenAdminItems('verifications', verItems);
   const flagSus = hasUnseenAdminItems('suspended', susItems);
+  const flagAppeal = hasUnseenAdminItems('appeals', appealItems);
   const flagAds = hasUnseenAdminItems('ads', adItems);
   const flagRew = hasUnseenAdminItems('rewards', rewardItems);
   const flagChat = hasUnseenAdminItems('chat', chatItems);
@@ -5040,6 +5134,7 @@ function loadAdminStats(){
   showBadge('badge-withdraws', flagWd);
   showBadge('badge-verifications', flagVer);
   showBadge('badge-suspended', flagSus);
+  showBadge('badge-appeals', flagAppeal);
   showBadge('badge-ads', flagAds);
   showBadge('badge-rewards', flagRew);
   showBadge('badge-chat', flagChat);
@@ -5060,6 +5155,7 @@ function loadAdminStats(){
   showBadge('qa-badge-withdraws', flagWd);
   showBadge('qa-badge-verifications', flagVer);
   showBadge('qa-badge-suspended', flagSus);
+  showBadge('qa-badge-appeals', flagAppeal);
   showBadge('qa-badge-ads', flagAds);
   showBadge('qa-badge-rewards', flagRew);
   showBadge('qa-badge-chat', flagChat);
@@ -5100,7 +5196,10 @@ function adminUserCard(u, opts){
   const verBadge = u.verified || u.verifyStatus==='approved' ? '<span class="bg-green-100 text-green-700 text-[10px] font-bold px-2 py-0.5 rounded-full">Verified</span>' : '<span class="bg-slate-100 text-slate-500 text-[10px] px-2 py-0.5 rounded-full">Unverified</span>';
   const banBadge = u.banned ? '<span class="bg-red-100 text-red-600 text-[10px] font-bold px-2 py-0.5 rounded-full">SUSPENDED</span>' : '';
   const appealBadge = (u.banned && u.appealStatus==='pending') ? '<span class="bg-amber-100 text-amber-700 text-[10px] font-bold px-2 py-0.5 rounded-full">APPEAL PENDING</span>' : '';
-  const banInfo = u.banned && u.banDate ? `<p class="text-[10px] text-red-500 mt-0.5">Suspended: ${u.banDate}</p>` : '';
+  const sc = Number(u.suspendCount) || (u.banned ? 1 : 0);
+  const banInfo = u.banned && u.banDate
+    ? `<p class="text-[10px] text-red-500 mt-0.5">Suspended: ${u.banDate} · <b>${sc}x</b> times</p>`
+    : (sc > 0 ? `<p class="text-[10px] text-amber-600 mt-0.5">Suspend history: <b>${sc}x</b></p>` : '');
   const appealInfo = u.appealText ? `<p class="text-[10px] text-amber-700 mt-1 bg-amber-50 p-1.5 rounded">Appeal: ${u.appealText}</p>` : '';
   const onlineDot = online
     ? '<span class="inline-block w-2.5 h-2.5 bg-green-500 rounded-full ring-2 ring-green-200 mr-1.5" title="Online"></span>'
@@ -5150,31 +5249,44 @@ function adminUserCard(u, opts){
 async function adminSendUserNotice(uid){
   const u = users[uid] || Object.values(users).find(x => x.authUid===uid);
   if(!u) return toast('User পাওয়া যায়নি','err');
-  const title = prompt('Notice Title:', 'Admin Notice');
-  if(title === null) return;
-  const t = (title||'').trim();
-  if(!t) return toast('Title দিন','err');
-  const body = prompt('Notice Message:', '');
-  if(body === null) return;
-  const b = (body||'').trim();
-  if(!b) return toast('Message দিন','err');
-  u.notices = u.notices || [];
-  u.notices.unshift({
-    id: Date.now() + Math.random(),
-    title: t,
-    body: b,
-    time: new Date().toLocaleString(),
-    ts: Date.now(),
-    fromAdmin: true
-  });
-  if(u.seenNoticeIds){
-    // ensure unread
-  }
-  if(window.fbSaveUser && u.authUid) {
-    try { await window.fbSaveUser(u); } catch(e){ console.error(e); }
-  }
-  users[u.authUid || u.userId] = u;
-  toast('Notice পাঠানো হয়েছে — User Notification-এ দেখবে');
+  const old = document.getElementById('adminUserNoticeModal');
+  if(old) old.remove();
+  const html = `<div id="adminUserNoticeModal" class="fixed inset-0 z-[85] flex items-center justify-center p-4">
+    <div class="absolute inset-0 bg-black/50" onclick="document.getElementById('adminUserNoticeModal').remove()"></div>
+    <div class="relative bg-white rounded-3xl shadow-2xl w-full max-w-sm p-5 z-10">
+      <h3 class="font-bold text-lg text-slate-900 mb-1">Notice পাঠান</h3>
+      <p class="text-xs text-slate-500 mb-3">${u.name||'User'}-কে Notification যাবে</p>
+      <input type="text" id="adminUserNoticeTitle" class="w-full border-2 border-slate-200 rounded-xl px-4 py-2.5 text-sm focus:outline-none focus:border-green-500 mb-2" placeholder="Title লিখুন...">
+      <textarea id="adminUserNoticeBody" class="w-full border-2 border-slate-200 rounded-xl px-4 py-3 text-sm focus:outline-none focus:border-green-500 resize-none h-28 mb-4" placeholder="মেসেজ এখানে লিখুন..." maxlength="500"></textarea>
+      <div class="flex gap-2">
+        <button type="button" onclick="document.getElementById('adminUserNoticeModal').remove()" class="flex-1 py-2.5 rounded-xl bg-slate-100 text-slate-700 font-semibold text-sm">বাতিল</button>
+        <button type="button" id="adminUserNoticeSendBtn" class="flex-1 py-2.5 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white font-bold text-sm">পাঠান</button>
+      </div>
+    </div>
+  </div>`;
+  document.body.insertAdjacentHTML('beforeend', html);
+  document.getElementById('adminUserNoticeTitle')?.focus();
+  document.getElementById('adminUserNoticeSendBtn').onclick = async function(){
+    const t = (document.getElementById('adminUserNoticeTitle')?.value || '').trim();
+    const b = (document.getElementById('adminUserNoticeBody')?.value || '').trim();
+    if(!t) return toast('Title লিখুন','err');
+    if(!b) return toast('মেসেজ লিখুন','err');
+    u.notices = u.notices || [];
+    u.notices.unshift({
+      id: Date.now() + Math.random(),
+      title: t,
+      body: b,
+      time: new Date().toLocaleString(),
+      ts: Date.now(),
+      fromAdmin: true
+    });
+    if(window.fbSaveUser && u.authUid) {
+      try { await window.fbSaveUser(u); } catch(e){ console.error(e); }
+    }
+    users[u.authUid || u.userId] = u;
+    document.getElementById('adminUserNoticeModal')?.remove();
+    toast('Notice পাঠানো হয়েছে');
+  };
 }
 
 async function renderAdminUsers(){
@@ -5182,9 +5294,8 @@ async function renderAdminUsers(){
   const countEl = document.getElementById('adminUsersActiveCount');
   if(!el) return;
   await loadAllUsersCache();
-  // ALL users who created account (except permanent deleted)
-  let list = Object.values(users).filter(u => u && u.authUid && !u.permanentBan);
-  // Facebook style: Online first, then others. Within each group by join date
+  // Active users only — suspended go to Suspended tab; permanent banned deleted
+  let list = Object.values(users).filter(u => u && u.authUid && !u.permanentBan && !u.banned);
   list.sort((a,b) => {
     const ao = isUserOnline(a) ? 1 : 0;
     const bo = isUserOnline(b) ? 1 : 0;
@@ -5192,7 +5303,7 @@ async function renderAdminUsers(){
     return (b.joinDate||'').localeCompare(a.joinDate||'');
   });
   const onlineCount = list.filter(u => isUserOnline(u)).length;
-  if(countEl) countEl.innerHTML = `<span class="inline-flex items-center gap-1.5"><span class="w-2 h-2 bg-green-500 rounded-full"></span><b class="text-green-700">${onlineCount}</b> Online</span> · <b>${list.length}</b> Total Users`;
+  if(countEl) countEl.innerHTML = `<span class="inline-flex items-center gap-1.5"><span class="w-2 h-2 bg-green-500 rounded-full"></span><b class="text-green-700">${onlineCount}</b> Online</span> · <b>${list.length}</b> Active Users`;
   const q = (document.getElementById('adminSearchUsers')?.value || '').trim().toLowerCase();
   if(q){
     list = list.filter(u =>
@@ -5202,7 +5313,7 @@ async function renderAdminUsers(){
     );
   }
   if(!list.length){ el.innerHTML = '<p class="text-slate-400 text-center py-8">No users found</p>'; return; }
-  el.innerHTML = list.map(u => adminUserCard(u, u.banned ? 'suspended' : 'all')).join('');
+  el.innerHTML = list.map(u => adminUserCard(u, 'all')).join('');
 }
 
 async function renderAdminSuspended(){
@@ -5221,6 +5332,62 @@ async function renderAdminSuspended(){
   }
   if(!list.length){ el.innerHTML = '<p class="text-slate-400 text-center py-8">No suspended users</p>'; return; }
   el.innerHTML = list.map(u => adminUserCard(u, 'suspended')).join('');
+}
+
+async function renderAdminAppeals(){
+  const el = document.getElementById('adminAppealsList');
+  if(!el) return;
+  await loadAllUsersCache();
+  // Pending appeals only (or within 1 month)
+  let list = Object.values(users).filter(u => {
+    if(!u || !u.authUid || u.permanentBan) return false;
+    if(u.appealStatus !== 'pending') return false;
+    // auto-hide older than 1 month
+    if(u.appealTs && isOlderThanOneMonth({ ts: u.appealTs })) return false;
+    if(u.appealDate && isOlderThanOneMonth({ time: u.appealDate })) return false;
+    return true;
+  });
+  list.sort((a,b) => (Number(b.appealTs)||0) - (Number(a.appealTs)||0));
+  const q = (document.getElementById('adminSearchAppeals')?.value || '').trim().toLowerCase();
+  if(q){
+    list = list.filter(u =>
+      (u.name||'').toLowerCase().includes(q) ||
+      (u.email||'').toLowerCase().includes(q) ||
+      (u.authUid||'').toLowerCase().includes(q) ||
+      (u.appealText||'').toLowerCase().includes(q)
+    );
+  }
+  if(!list.length){ el.innerHTML = '<p class="text-slate-400 text-center py-8">No pending appeals</p>'; return; }
+  el.innerHTML = list.map(u => {
+    const sc = Number(u.suspendCount) || 1;
+    const safeUid = String(u.authUid||'').replace(/'/g, "\\'");
+    return `<div class="bg-white rounded-2xl border border-amber-200 p-4 shadow-sm">
+      <div class="flex justify-between items-start mb-2">
+        <div>
+          <p class="font-bold text-slate-900">${u.name||'—'}</p>
+          <p class="text-xs text-slate-500">${u.email||''}</p>
+          <p class="text-[10px] text-slate-500 mt-0.5">User ID: <span class="font-mono font-semibold break-all">${u.authUid||'—'}</span></p>
+          <p class="text-[10px] text-red-500 mt-0.5">Suspended: ${u.banDate||'—'} · <b>${sc}x</b> times</p>
+        </div>
+        <span class="text-[10px] font-bold px-2 py-0.5 rounded-full bg-amber-100 text-amber-700">APPEAL PENDING</span>
+      </div>
+      <div class="bg-amber-50 border border-amber-100 rounded-xl p-3 mb-3">
+        <p class="text-[10px] font-bold text-amber-700 uppercase mb-1">Appeal Message</p>
+        <p class="text-sm text-slate-800 whitespace-pre-wrap">${u.appealText||'—'}</p>
+        <p class="text-[10px] text-slate-400 mt-1">${u.appealDate ? new Date(u.appealDate).toLocaleString() : ''}</p>
+      </div>
+      <div class="grid grid-cols-2 sm:grid-cols-4 gap-2 text-xs mb-3">
+        <div class="bg-slate-50 rounded-lg p-2 text-center"><p class="text-slate-400">Earning</p><p class="font-bold text-green-600">৳${Number(u.earned||0).toFixed(0)}</p></div>
+        <div class="bg-slate-50 rounded-lg p-2 text-center"><p class="text-slate-400">Deposit</p><p class="font-bold">৳${Number(u.deposited||0).toFixed(0)}</p></div>
+        <div class="bg-slate-50 rounded-lg p-2 text-center"><p class="text-slate-400">Tasks</p><p class="font-bold">${(u.tasks||[]).length}</p></div>
+        <div class="bg-slate-50 rounded-lg p-2 text-center"><p class="text-slate-400">Country</p><p class="font-bold">${u.country||'—'}</p></div>
+      </div>
+      <div class="flex flex-wrap gap-2">
+        <button onclick="adminConfirm('Appeal Approve করে Unsuspend করবেন?',()=>adminResolveAppeal('${safeUid}','approve'))" class="text-[11px] px-3 py-1.5 rounded-lg font-semibold bg-emerald-100 text-emerald-700">Approve Appeal</button>
+        <button onclick="adminConfirm('Appeal Reject করবেন?',()=>adminResolveAppeal('${safeUid}','reject'))" class="text-[11px] px-3 py-1.5 rounded-lg font-semibold bg-orange-100 text-orange-700">Reject Appeal</button>
+      </div>
+    </div>`;
+  }).join('');
 }
 
 async function adminPermanentBan(uid){
@@ -5250,11 +5417,12 @@ async function adminToggleBan(uid){
   if(u.banned){
     u.banDate = new Date().toLocaleString();
     u.banTs = Date.now();
+    u.suspendCount = (Number(u.suspendCount) || 0) + 1;
     u.appealStatus = null;
     u.appealText = null;
     u.appealDate = null;
     u.notices = u.notices || [];
-    u.notices.unshift({id:Date.now(), ts:Date.now(), title:'Account Suspended', body:'আপনার অ্যাকাউন্ট Suspend করা হয়েছে। আপনি Appeal দিতে পারেন। Admin ৩ মাসের মধ্যে resolve না করলে অ্যাকাউন্ট স্থায়ীভাবে মুছে যাবে।', time:new Date().toLocaleString()});
+    u.notices.unshift({id:Date.now(), ts:Date.now(), title:'Account Suspended', body:'আপনার অ্যাকাউন্ট Suspend করা হয়েছে। শুধু Appeal দিতে পারবেন।', time:new Date().toLocaleString()});
   } else {
     u.banDate = null;
     u.banTs = null;
@@ -5267,6 +5435,7 @@ async function adminToggleBan(uid){
   if(window.fbSaveUser && u.authUid) await window.fbSaveUser(u);
   renderAdminUsers();
   renderAdminSuspended();
+  if(typeof renderAdminAppeals === 'function') renderAdminAppeals();
   toast(u.banned ? 'User Suspended' : 'User Unsuspended');
 }
 
@@ -5289,6 +5458,7 @@ async function adminResolveAppeal(uid, action){
   if(window.fbSaveUser && u.authUid) await window.fbSaveUser(u);
   renderAdminUsers();
   renderAdminSuspended();
+  if(typeof renderAdminAppeals === 'function') renderAdminAppeals();
 }
 function adminForceUnlock(uid){
   const u = users[uid]; if(!u) return;
@@ -5585,16 +5755,18 @@ function adminShowJobDetail(i){
   document.body.insertAdjacentHTML('beforeend', html);
 }
 async function adminDeleteJob(i){
-  if(!confirm('Delete this job?')) return;
   const j = JOBS[i];
-  if(j && j._docId && window.fbDeleteJob) {
-    try { await window.fbDeleteJob(j._docId); } catch(e){ console.error(e); }
-  }
-  if(i >= 0) JOBS.splice(i,1);
-  renderAdminJobs();
-  loadAdminStats();
-  if(typeof renderJobs === 'function') renderJobs();
-  toast('Job deleted');
+  const title = (j && j.title) ? j.title : 'Job';
+  adminConfirm('"' + title + '" জবটি মুছে ফেলবেন? এটা আর ফেরত আসবে না।', async () => {
+    if(j && j._docId && window.fbDeleteJob) {
+      try { await window.fbDeleteJob(j._docId); } catch(e){ console.error(e); }
+    }
+    if(i >= 0) JOBS.splice(i,1);
+    renderAdminJobs();
+    loadAdminStats();
+    if(typeof renderJobs === 'function') renderJobs();
+    toast('Job deleted');
+  });
 }
 async function adminTogglePinJob(i){
   const j = JOBS[i]; if(!j) return;
@@ -5648,10 +5820,11 @@ async function renderAdminReports(){
       </div>
       <p class="text-sm mt-2 bg-amber-50 border border-amber-100 p-2.5 rounded-xl text-slate-800">${r.reason||''}</p>
       <p class="text-[10px] text-slate-400 mt-1">${r.time||''} • Status: <b>${r.status||'Open'}</b></p>
-      <div class="flex flex-wrap gap-2 mt-3">
-        ${againstId ? `<button onclick="adminReportWarn('${safeAgainst}','${safeId}')" class="text-[11px] px-3 py-1.5 rounded-lg font-semibold bg-amber-100 text-amber-800"><i class="fa-solid fa-bell"></i> Notice</button>
-        <button onclick="adminReportSuspend('${safeAgainst}','${safeId}')" class="text-[11px] px-3 py-1.5 rounded-lg font-semibold bg-red-100 text-red-600"><i class="fa-solid fa-ban"></i> Suspend</button>` : ''}
-        <button onclick="adminCloseReport('${safeId}')" class="text-[11px] px-3 py-1.5 rounded-lg font-semibold bg-slate-100 text-slate-600">Close</button>
+      <div class="flex flex-wrap gap-2 mt-3" id="reportActions_${safeId}">
+        ${againstId && (r.status||'Open') !== 'Closed' ? `<button onclick="adminConfirm('এই ইউজারকে সতর্কবার্তা পাঠাবেন?',()=>adminReportWarn('${safeAgainst}','${safeId}'))" class="text-[11px] px-3 py-1.5 rounded-lg font-semibold bg-amber-100 text-amber-800 report-act-btn"><i class="fa-solid fa-bell"></i> Notice</button>
+        <button onclick="adminConfirm('এই ইউজারকে Suspend করবেন?',()=>adminReportSuspend('${safeAgainst}','${safeId}'))" class="text-[11px] px-3 py-1.5 rounded-lg font-semibold bg-red-100 text-red-600 report-act-btn"><i class="fa-solid fa-ban"></i> Suspend</button>` : ''}
+        ${(r.status||'Open') !== 'Closed' ? `<button onclick="adminCloseReportUI('${safeId}')" class="text-[11px] px-3 py-1.5 rounded-lg font-semibold bg-slate-100 text-slate-600">Close</button>` : ''}
+        ${(r.status||'') === 'Closed' ? `<button onclick="adminConfirm('এই Report মুছে ফেলবেন?',()=>adminDeleteReport('${safeId}'))" class="text-[11px] px-3 py-1.5 rounded-lg font-semibold bg-red-600 text-white"><i class="fa-solid fa-trash"></i> Delete</button>` : ''}
       </div>
     </div>`;
   };
@@ -5670,18 +5843,69 @@ async function adminCloseReport(docId){
   toast('Report closed');
 }
 
+/** Close report UI: hide Notice/Suspend, show Delete */
+function adminCloseReportUI(docId){
+  adminConfirm('Report Close করবেন? Notice/Suspend হাইড হয়ে Delete অপশন আসবে।', async () => {
+    await adminCloseReport(docId);
+  });
+}
+
+async function adminDeleteReport(docId){
+  if(!docId) return;
+  try {
+    if(window.fbDb){
+      const { deleteDoc, doc } = await import('https://www.gstatic.com/firebasejs/12.18.0/firebase-firestore.js');
+      await deleteDoc(doc(window.fbDb, 'reports', docId));
+    }
+  } catch(e){ console.error(e); return toast('Delete ব্যর্থ','err'); }
+  renderAdminReports();
+  toast('Report মুছে ফেলা হয়েছে');
+}
+
+/** Notice modal — empty box, no site link */
+function openAdminNoticeModal(userId, reportDocId){
+  const old = document.getElementById('adminNoticeModal');
+  if(old) old.remove();
+  const html = `<div id="adminNoticeModal" class="fixed inset-0 z-[85] flex items-center justify-center p-4">
+    <div class="absolute inset-0 bg-black/50" onclick="document.getElementById('adminNoticeModal').remove()"></div>
+    <div class="relative bg-white rounded-3xl shadow-2xl w-full max-w-sm p-5 z-10">
+      <h3 class="font-bold text-lg text-slate-900 mb-1">সতর্কবার্তা পাঠান</h3>
+      <p class="text-xs text-slate-500 mb-3">ইউজারের Notification-এ যাবে</p>
+      <textarea id="adminNoticeInput" class="w-full border-2 border-slate-200 rounded-xl px-4 py-3 text-sm focus:outline-none focus:border-green-500 resize-none h-28 mb-4" placeholder="সতর্কবার্তা এখানে লিখুন..." maxlength="500"></textarea>
+      <div class="flex gap-2">
+        <button type="button" onclick="document.getElementById('adminNoticeModal').remove()" class="flex-1 py-2.5 rounded-xl bg-slate-100 text-slate-700 font-semibold text-sm">বাতিল</button>
+        <button type="button" id="adminNoticeSendBtn" class="flex-1 py-2.5 rounded-xl bg-amber-500 hover:bg-amber-600 text-white font-bold text-sm">পাঠান</button>
+      </div>
+    </div>
+  </div>`;
+  document.body.insertAdjacentHTML('beforeend', html);
+  const input = document.getElementById('adminNoticeInput');
+  if(input){ input.value = ''; input.focus(); }
+  const btn = document.getElementById('adminNoticeSendBtn');
+  if(btn){
+    btn.onclick = async function(){
+      const body = (document.getElementById('adminNoticeInput')?.value || '').trim();
+      if(!body) return toast('সতর্কবার্তা লিখুন','err');
+      document.getElementById('adminNoticeModal')?.remove();
+      await adminReportWarnSend(userId, reportDocId, body);
+    };
+  }
+}
+
 async function adminReportWarn(userId, reportDocId){
+  openAdminNoticeModal(userId, reportDocId);
+}
+
+async function adminReportWarnSend(userId, reportDocId, body){
   if(!userId) return toast('User ID নেই','err');
   let u = users[userId] || Object.values(users||{}).find(x => x.authUid === userId || x.userId === userId);
   if(!u && window.fbLoadUser){ try { u = await window.fbLoadUser(userId); } catch(e){} }
   if(!u && window.fbFindUserByUserId){ try { u = await window.fbFindUserByUserId(userId); } catch(e){} }
   if(!u) return toast('ইউজার পাওয়া যায়নি','err');
-  const msg = prompt('সতর্কবার্তা লিখুন (ইউজার নোটিফিকেশনে পাবে):', 'আপনার অ্যাকাউন্টে রিপোর্ট এসেছে। নিয়ম মেনে কাজ করুন, নাহলে অ্যাকাউন্ট সাসপেন্ড হতে পারে।');
-  if(msg === null) return;
-  const body = (msg||'').trim() || 'আপনার বিরুদ্ধে রিপোর্ট এসেছে। সতর্ক থাকুন।';
   u.notices = u.notices || [];
   u.notices.unshift({
     id: Date.now(),
+    ts: Date.now(),
     title: '⚠️ সতর্কবার্তা (Admin)',
     body: body,
     time: new Date().toLocaleString()
@@ -5698,18 +5922,23 @@ async function adminReportWarn(userId, reportDocId){
 
 async function adminReportSuspend(userId, reportDocId){
   if(!userId) return toast('User ID নেই','err');
-  if(!confirm('এই ইউজারকে Suspend করবেন?')) return;
   let u = users[userId] || Object.values(users||{}).find(x => x.authUid === userId || x.userId === userId);
   if(!u && window.fbLoadUser){ try { u = await window.fbLoadUser(userId); } catch(e){} }
   if(!u && window.fbFindUserByUserId){ try { u = await window.fbFindUserByUserId(userId); } catch(e){} }
   if(!u) return toast('ইউজার পাওয়া যায়নি','err');
   u.banned = true;
   u.banDate = new Date().toLocaleString();
+  u.banTs = Date.now();
+  u.suspendCount = (Number(u.suspendCount) || 0) + 1;
+  u.appealStatus = null;
+  u.appealText = null;
+  u.appealDate = null;
   u.notices = u.notices || [];
   u.notices.unshift({
     id: Date.now(),
+    ts: Date.now(),
     title: 'অ্যাকাউন্ট সাসপেন্ড',
-    body: 'রিপোর্টের কারণে আপনার অ্যাকাউন্ট সাসপেন্ড করা হয়েছে। সাপোর্টে যোগাযোগ করুন।',
+    body: 'রিপোর্টের কারণে আপনার অ্যাকাউন্ট সাসপেন্ড করা হয়েছে। শুধু Appeal দিতে পারবেন।',
     time: new Date().toLocaleString()
   });
   if(u.userId) users[u.userId] = u;
@@ -5720,6 +5949,7 @@ async function adminReportSuspend(userId, reportDocId){
   }
   if(typeof renderAdminUsers === 'function') renderAdminUsers();
   if(typeof renderAdminSuspended === 'function') renderAdminSuspended();
+  if(typeof renderAdminAppeals === 'function') renderAdminAppeals();
   renderAdminReports();
   toast('User Suspended');
 }
@@ -6225,37 +6455,57 @@ async function adminEditChatMsg(docId){
   if(!docId) return toast('Message ID নেই','err');
   const msg = (_adminChatList||[]).find(m => m._docId === docId);
   if(!msg) return toast('মেসেজ পাওয়া যায়নি','err');
-  const newText = prompt('মেসেজ এডিট করুন:', msg.text || '');
-  if(newText === null) return;
-  const trimmed = newText.trim();
-  if(!trimmed) return toast('খালি মেসেজ রাখা যাবে না','err');
-  try {
-    if(window.fbUpdateChat) await window.fbUpdateChat(docId, { text: trimmed, edited: true });
-    msg.text = trimmed;
-    msg.edited = true;
-    if(_adminActiveThread) adminOpenThread(_adminActiveThread, true);
-    toast('মেসেজ আপডেট হয়েছে');
-  } catch(e){
-    console.error(e);
-    toast('এডিট ব্যর্থ','err');
-  }
+  const old = document.getElementById('adminChatEditModal');
+  if(old) old.remove();
+  const safeText = String(msg.text || '').replace(/</g,'&lt;');
+  const html = `<div id="adminChatEditModal" class="fixed inset-0 z-[85] flex items-center justify-center p-4">
+    <div class="absolute inset-0 bg-black/50" onclick="document.getElementById('adminChatEditModal').remove()"></div>
+    <div class="relative bg-white rounded-3xl shadow-2xl w-full max-w-sm p-5 z-10">
+      <h3 class="font-bold text-lg text-slate-900 mb-1">মেসেজ এডিট</h3>
+      <p class="text-xs text-slate-500 mb-3">নতুন টেক্সট লিখুন</p>
+      <textarea id="adminChatEditInput" class="w-full border-2 border-slate-200 rounded-xl px-4 py-3 text-sm focus:outline-none focus:border-green-500 resize-none h-28 mb-4" maxlength="1000"></textarea>
+      <div class="flex gap-2">
+        <button type="button" onclick="document.getElementById('adminChatEditModal').remove()" class="flex-1 py-2.5 rounded-xl bg-slate-100 text-slate-700 font-semibold text-sm">বাতিল</button>
+        <button type="button" id="adminChatEditOk" class="flex-1 py-2.5 rounded-xl bg-green-600 hover:bg-green-700 text-white font-bold text-sm">সেভ</button>
+      </div>
+    </div>
+  </div>`;
+  document.body.insertAdjacentHTML('beforeend', html);
+  const input = document.getElementById('adminChatEditInput');
+  if(input){ input.value = msg.text || ''; input.focus(); }
+  document.getElementById('adminChatEditOk').onclick = async function(){
+    const trimmed = (document.getElementById('adminChatEditInput')?.value || '').trim();
+    if(!trimmed) return toast('খালি মেসেজ রাখা যাবে না','err');
+    document.getElementById('adminChatEditModal')?.remove();
+    try {
+      if(window.fbUpdateChat) await window.fbUpdateChat(docId, { text: trimmed, edited: true });
+      msg.text = trimmed;
+      msg.edited = true;
+      if(_adminActiveThread) adminOpenThread(_adminActiveThread, true);
+      toast('মেসেজ আপডেট হয়েছে');
+    } catch(e){
+      console.error(e);
+      toast('এডিট ব্যর্থ','err');
+    }
+  };
 }
 
 async function adminDeleteChatMsg(docId){
   if(!docId) return toast('Message ID নেই','err');
-  if(!confirm('এই মেসেজ ডিলিট করবেন?')) return;
-  try {
-    if(window.fbDeleteChat) await window.fbDeleteChat(docId);
-    _adminChatList = (_adminChatList||[]).filter(m => m._docId !== docId);
-    _chatCache = (_chatCache||[]).filter(m => m._docId !== docId);
-    if(_adminActiveThread) adminOpenThread(_adminActiveThread, true);
-    else renderAdminChat();
-    loadAdminStats();
-    toast('মেসেজ ডিলিট হয়েছে');
-  } catch(e){
-    console.error(e);
-    toast('ডিলিট ব্যর্থ','err');
-  }
+  adminConfirm('এই মেসেজ ডিলিট করবেন?', async () => {
+    try {
+      if(window.fbDeleteChat) await window.fbDeleteChat(docId);
+      _adminChatList = (_adminChatList||[]).filter(m => m._docId !== docId);
+      _chatCache = (_chatCache||[]).filter(m => m._docId !== docId);
+      if(_adminActiveThread) adminOpenThread(_adminActiveThread, true);
+      else renderAdminChat();
+      loadAdminStats();
+      toast('মেসেজ ডিলিট হয়েছে');
+    } catch(e){
+      console.error(e);
+      toast('ডিলিট ব্যর্থ','err');
+    }
+  });
 }
 
 let _rewardCache = null;
@@ -6490,6 +6740,7 @@ function openSitePage(key){
       <button data-admin="overview" onclick="adminGo('overview')" class="admin-nav-btn relative bg-green-600 text-white text-xs font-semibold px-4 py-2 rounded-xl whitespace-nowrap">Overview</button>
       <button data-admin="users" onclick="adminGo('users')" class="admin-nav-btn relative bg-slate-100 text-slate-700 text-xs font-semibold px-4 py-2 rounded-xl whitespace-nowrap">Users<span id="badge-users" class="hidden absolute -top-1 -right-1 w-2.5 h-2.5 bg-red-500 rounded-full ring-2 ring-white"></span></button>
       <button data-admin="suspended" onclick="adminGo('suspended')" class="admin-nav-btn relative bg-slate-100 text-slate-700 text-xs font-semibold px-4 py-2 rounded-xl whitespace-nowrap">Suspended<span id="badge-suspended" class="hidden absolute -top-1 -right-1 w-2.5 h-2.5 bg-red-500 rounded-full ring-2 ring-white"></span></button>
+      <button data-admin="appeals" onclick="adminGo('appeals')" class="admin-nav-btn relative bg-slate-100 text-slate-700 text-xs font-semibold px-4 py-2 rounded-xl whitespace-nowrap">Appeals<span id="badge-appeals" class="hidden absolute -top-1 -right-1 w-2.5 h-2.5 bg-red-500 rounded-full ring-2 ring-white"></span></button>
       <button data-admin="deposits" onclick="adminGo('deposits')" class="admin-nav-btn relative bg-slate-100 text-slate-700 text-xs font-semibold px-4 py-2 rounded-xl whitespace-nowrap">Deposits<span id="badge-deposits" class="hidden absolute -top-1 -right-1 w-2.5 h-2.5 bg-red-500 rounded-full ring-2 ring-white"></span></button>
       <button data-admin="withdraws" onclick="adminGo('withdraws')" class="admin-nav-btn relative bg-slate-100 text-slate-700 text-xs font-semibold px-4 py-2 rounded-xl whitespace-nowrap">Withdraws<span id="badge-withdraws" class="hidden absolute -top-1 -right-1 w-2.5 h-2.5 bg-red-500 rounded-full ring-2 ring-white"></span></button>
       <button data-admin="verifications" onclick="adminGo('verifications')" class="admin-nav-btn relative bg-slate-100 text-slate-700 text-xs font-semibold px-4 py-2 rounded-xl whitespace-nowrap">Verify<span id="badge-verifications" class="hidden absolute -top-1 -right-1 w-2.5 h-2.5 bg-red-500 rounded-full ring-2 ring-white"></span></button>
@@ -6539,6 +6790,7 @@ function openSitePage(key){
         <div class="flex flex-wrap gap-2">
           <button onclick="adminGo('users')" class="relative bg-slate-800 text-white text-xs font-bold px-4 py-2 rounded-xl">Users<span id="qa-badge-users" class="hidden absolute -top-1 -right-1 w-2.5 h-2.5 bg-red-500 rounded-full ring-2 ring-white"></span></button>
           <button onclick="adminGo('suspended')" class="relative bg-red-600 text-white text-xs font-bold px-4 py-2 rounded-xl">Suspended<span id="qa-badge-suspended" class="hidden absolute -top-1 -right-1 w-2.5 h-2.5 bg-red-500 rounded-full ring-2 ring-white"></span></button>
+          <button onclick="adminGo('appeals')" class="relative bg-amber-600 text-white text-xs font-bold px-4 py-2 rounded-xl">Appeals<span id="qa-badge-appeals" class="hidden absolute -top-1 -right-1 w-2.5 h-2.5 bg-red-500 rounded-full ring-2 ring-white"></span></button>
           <button onclick="adminGo('deposits')" class="relative bg-amber-500 text-white text-xs font-bold px-4 py-2 rounded-xl">Deposits<span id="qa-badge-deposits" class="hidden absolute -top-1 -right-1 w-2.5 h-2.5 bg-red-500 rounded-full ring-2 ring-white"></span></button>
           <button onclick="adminGo('withdraws')" class="relative bg-orange-500 text-white text-xs font-bold px-4 py-2 rounded-xl">Withdraws<span id="qa-badge-withdraws" class="hidden absolute -top-1 -right-1 w-2.5 h-2.5 bg-red-500 rounded-full ring-2 ring-white"></span></button>
           <button onclick="adminGo('verifications')" class="relative bg-blue-500 text-white text-xs font-bold px-4 py-2 rounded-xl">Verify<span id="qa-badge-verifications" class="hidden absolute -top-1 -right-1 w-2.5 h-2.5 bg-red-500 rounded-full ring-2 ring-white"></span></button>
@@ -6567,6 +6819,13 @@ function openSitePage(key){
       <p class="text-xs text-slate-500 mb-2">Suspend করা ইউজার এখানে আসবে। Unsuspend করলে আবার Users লিস্টে চলে যাবে। Permanent Ban করলে অ্যাকাউন্ট মুছে যাবে।</p>
       <input type="search" id="adminSearchSuspended" oninput="renderAdminSuspended()" placeholder="Search suspended users..." class="input-f mb-3 text-sm">
       <div id="adminSuspendedList" class="space-y-3"></div>
+    </div>
+
+    <div id="admin-appeals" class="hidden">
+      <h2 class="font-bold text-lg text-slate-900 mb-3">Appeals</h2>
+      <p class="text-xs text-slate-500 mb-2">Suspended ইউজারদের Appeal এখানে জমা হয়। Approve করলে Unsuspend হবে। ১ মাসের বেশি পুরনো Appeal অটো ডিলিট।</p>
+      <input type="search" id="adminSearchAppeals" oninput="renderAdminAppeals()" placeholder="Search appeals..." class="input-f mb-3 text-sm">
+      <div id="adminAppealsList" class="space-y-3"></div>
     </div>
 
     <div id="admin-deposits" class="hidden">
