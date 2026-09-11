@@ -655,8 +655,8 @@ body.dark-theme .side-item:hover,body.dark-theme .side-item.active{background:#0
         </div>
         <div class="p-5 bg-slate-50">
           <div id="loginBox">
-            <label class="block text-sm font-semibold text-slate-700 mb-1.5">Email</label>
-            <input type="text" id="loginId" class="w-full border-2 border-green-200 rounded-xl px-4 py-3 text-sm bg-white focus:outline-none focus:border-green-500 mb-4" placeholder="আপনার Gmail লিখুন">
+            <label class="block text-sm font-semibold text-slate-700 mb-1.5">Email / User ID</label>
+            <input type="text" id="loginId" class="w-full border-2 border-green-200 rounded-xl px-4 py-3 text-sm bg-white focus:outline-none focus:border-green-500 mb-4" placeholder="Gmail অথবা User ID লিখুন">
             
             <label class="block text-sm font-semibold text-slate-700 mb-1.5">Password</label>
 
@@ -1062,7 +1062,7 @@ body.dark-theme .side-item:hover,body.dark-theme .side-item.active{background:#0
 
       <div id="jdSubmitBox">
         <p class="text-sm font-bold text-blue-600 mb-2">SUBMIT REQUIRED WORK PROVE</p>
-        <textarea id="jdProveText" class="input-f h-24 mb-3 resize-none" placeholder="Prove Text Max Length is 2500 Character" maxlength="2500"></textarea>
+        <textarea id="jdProveText" class="input-f h-24 mb-3 resize-none" placeholder="কাজ সম্পন্ন করার প্রুফ এখানে লিখুন (সর্বোচ্চ ২৫০০ অক্ষর)" maxlength="2500"></textarea>
         <div id="jdShotsBox" class="mb-4"></div>
         <button onclick="submitJobProof()" class="w-full bg-green-600 hover:bg-green-700 text-white font-bold py-3 rounded-xl shadow-md flex items-center justify-center gap-2"><i class="fa-solid fa-check"></i> Submit</button>
       </div>
@@ -2273,20 +2273,19 @@ async function doRegister(){
 async function doLogin(){
   const id=document.getElementById('loginId').value.trim().toLowerCase();
   const p=document.getElementById('loginPass').value;
-  if(!id || !p) return toast('Email ও Password দিন','err');
+  if(!id || !p) return toast('Email/User ID ও Password দিন','err');
   const rememberEl = document.getElementById('loginRemember');
   if(rememberEl && !rememberEl.checked) return toast('Login করতে Remember me চেক করুন','err');
   if(!window.fbLogin) return toast('Firebase লোড হচ্ছে, একটু অপেক্ষা করুন','err');
 
-  // Login only with Email (User ID is Firebase UID, shown after login)
+  // Login with Gmail OR User ID (Firebase UID)
   let email = id;
   try {
     toast('লগইন হচ্ছে...');
     if(!id.includes('@')) {
-      // Allow login with Firebase UID as well
       const byUid = await window.fbLoadUser(id);
       if(byUid && byUid.email) email = byUid.email;
-      else return toast('শুধুমাত্র Email দিয়ে Login করুন','err');
+      else return toast('User ID পাওয়া যায়নি। Gmail দিয়ে চেষ্টা করুন।','err');
     }
     const u = await window.fbLogin(email, p);
     if(!u) return toast('প্রোফাইল পাওয়া যায়নি','err');
@@ -2318,7 +2317,8 @@ async function doLogin(){
 
     const nowStr = new Date().toLocaleString();
     currentUser.loginHistory.unshift({ip:'103.136.207.'+Math.floor(Math.random()*255), time: nowStr, ts: Date.now()});
-    if(currentUser.loginHistory.length > 8) currentUser.loginHistory = currentUser.loginHistory.slice(0,8);
+    // Keep only last 6 login records (older auto-removed)
+    if(currentUser.loginHistory.length > 6) currentUser.loginHistory = currentUser.loginHistory.slice(0,6);
     currentUser.lastActive = Date.now();
 
     users[currentUser.authUid] = currentUser;
@@ -2649,13 +2649,15 @@ function updateUI(){
     chartJobLabel.textContent = jobsPostedCount === 0 ? 'No Jobs' : (jobSatPct + '%');
   }
 
-  // Login history
+  // Login history — only last 6 (system keeps rolling window)
   const histList = document.getElementById('loginHistoryList');
   const curIP = document.getElementById('pCurrentIP');
-  const hist = currentUser.loginHistory || [];
+  const hist = (currentUser.loginHistory || []).slice(0, 6);
   if(curIP) curIP.textContent = hist[0] ? hist[0].ip : '—';
   if(histList){
-    histList.innerHTML = hist.map(h=>`<p>IP: ${h.ip} at ${h.time}</p>`).join('') || '<p>No history yet</p>';
+    histList.innerHTML = hist.length
+      ? hist.map(h => `<p class="flex justify-between gap-2"><span class="font-mono text-slate-700">${h.ip||'—'}</span><span class="text-slate-400">${h.time||''}</span></p>`).join('')
+      : '<p class="text-slate-400">No history yet</p>';
   }
   applyModeUI();
 }
@@ -2847,6 +2849,14 @@ function getFilteredJobs(){
     const st = (j.status || 'Active');
     return st === 'Active';
   });
+  // Hide jobs this user already submitted (one job = one submission only)
+  if(currentUser){
+    const doneIds = new Set();
+    (currentUser.tasks || []).forEach(t => {
+      if(t && t.jobId != null) doneIds.add(String(t.jobId));
+    });
+    list = list.filter(j => !doneIds.has(String(j.id)));
+  }
   // Locked users: only Gmail Account + Telegram
   if(currentUser && !isJobsUnlocked(currentUser)){
     list = list.filter(j => STARTER_CATEGORIES.some(c => (j.category||'').toLowerCase().includes(c.toLowerCase()) || c.toLowerCase().includes((j.category||'').toLowerCase())));
@@ -2909,6 +2919,10 @@ function openJobDetail(id){
   const j = JOBS.find(x => x.id === id || String(x.id)===String(id)) || JOBS.find((x,i)=>(x.id||(1000+i))===id);
   if(!j) return;
   if((j.status||'Active') !== 'Active') return toast('এই জব এখন উপলব্ধ নেই','err');
+  // Already submitted this job once — block reopen
+  if(currentUser && (currentUser.tasks||[]).some(t => t && String(t.jobId) === String(j.id))){
+    return toast('আপনি এই কাজটি ইতিমধ্যে সাবমিট করেছেন। একই কাজ দুবার করা যায় না।','err');
+  }
   // Locked users cannot open non-starter jobs
   if(currentUser && !isJobsUnlocked(currentUser)){
     const cat = (j.category||'').toLowerCase();
@@ -3029,8 +3043,12 @@ async function submitJobProof(){
     goView('verify');
     return;
   }
+  // One submission per job
+  if((currentUser.tasks||[]).some(t => t && String(t.jobId) === String(currentJob.id))){
+    return toast('আপনি এই কাজটি ইতিমধ্যে সাবমিট করেছেন।','err');
+  }
   const text = (document.getElementById('jdProveText')?.value||'').trim();
-  if(!text) return toast('Prove text লিখুন','err');
+  if(!text) return toast('প্রুফ টেক্সট লিখুন','err');
   const needShots = Math.min(Math.max(parseInt(currentJob.screens)||0, 0), 2);
   const files = [];
   for(let i=1;i<=needShots;i++){
@@ -3040,7 +3058,7 @@ async function submitJobProof(){
     files.push(inp.files[0]);
   }
 
-  toast('ছবি আপলোড হচ্ছে...');
+  toast('প্রুফ আপলোড হচ্ছে...');
   let shotUrls = [];
   try {
     for(const f of files){
@@ -3067,47 +3085,88 @@ async function submitJobProof(){
     ownerId: currentJob.ownerId || null
   };
 
-  // Always Pending — no auto approve. Buyer (if owner) or Admin must approve.
+  // Always Pending — Buyer (if owner) or Admin must approve.
   taskEntry.status = 'Pending';
   currentUser.tasks = currentUser.tasks||[];
   currentUser.tasks.unshift(taskEntry);
 
-  if(currentJob.ownerId && users[currentJob.ownerId]){
-    const owner = users[currentJob.ownerId];
-    owner.postedJobs = owner.postedJobs || [];
-    let pj = owner.postedJobs.find(j => j.id === currentJob.id);
-    if(pj){
-      pj.submissions = pj.submissions || [];
-      pj.submissions.unshift({
-        id: subId,
-        workerId: currentUser.authUid || currentUser.userId,
-        workerName: currentUser.name,
-        proofText: text,
-        shots: shotUrls,
-        status: 'Pending',
-        earned: price,
-        time: new Date().toLocaleString(),
-        ts: Date.now()
-      });
+  // Deliver proof to buyer My Jobs → Review
+  const ownerKey = currentJob.ownerId || null;
+  let owner = null;
+  if(ownerKey){
+    owner = users[ownerKey] || Object.values(users||{}).find(x => x.authUid === ownerKey || x.userId === ownerKey) || null;
+    if(!owner && window.fbLoadUser){
+      try { owner = await window.fbLoadUser(ownerKey); } catch(e){}
     }
+    if(!owner && window.fbFindUserByUserId){
+      try { owner = await window.fbFindUserByUserId(ownerKey); } catch(e){}
+    }
+  }
+  if(owner){
+    owner.postedJobs = owner.postedJobs || [];
+    let pj = owner.postedJobs.find(j => String(j.id) === String(currentJob.id));
+    if(!pj){
+      // Create mirror entry so buyer can still review
+      pj = {
+        id: currentJob.id,
+        title: currentJob.title,
+        workers: currentJob.total || currentJob.workers || 0,
+        total: currentJob.total || currentJob.workers || 0,
+        done: currentJob.done || 0,
+        price: currentJob.price,
+        earn: currentJob.price,
+        category: currentJob.category,
+        zone: currentJob.zone,
+        status: currentJob.status || 'Active',
+        submissions: []
+      };
+      owner.postedJobs.unshift(pj);
+    }
+    pj.submissions = pj.submissions || [];
+    pj.submissions.unshift({
+      id: subId,
+      workerId: currentUser.authUid || currentUser.userId,
+      workerName: currentUser.name,
+      proofText: text,
+      shots: shotUrls,
+      status: 'Pending',
+      earned: price,
+      time: new Date().toLocaleString(),
+      ts: Date.now()
+    });
     owner.notices = owner.notices || [];
     owner.notices.unshift({
       id: Date.now()+1,
       title: 'নতুন Proof সাবমিট',
-      body: currentUser.name + ' আপনার জব "' + currentJob.title + '"-এ প্রুফ জমা দিয়েছে। Review করুন।',
+      body: (currentUser.name || 'Worker') + ' আপনার জব "' + currentJob.title + '"-এ প্রুফ জমা দিয়েছে। My Jobs → Review থেকে চেক করুন।',
       time: 'Just now'
     });
-    if(owner.seenNoticeIds){
-      owner.seenNoticeIds = owner.seenNoticeIds.filter(id => id !== (Date.now()+1));
+    if(owner.userId) users[owner.userId] = owner;
+    if(owner.authUid) users[owner.authUid] = owner;
+    if(window.fbSaveUser && owner.authUid){
+      try { await window.fbSaveUser(owner); } catch(e){ console.error(e); }
     }
   } else {
     // System / no-owner job: stay Pending for Admin review only
     taskEntry.needsAdminReview = true;
   }
-  save();
+
+  await save();
   updateUI();
-  toast('Proof সাবমিট হয়েছে! Admin/Buyer Approve-এর অপেক্ষায়।');
-  goView('jobs');
+
+  // Professional success state on job detail before leaving
+  const submitBox = document.getElementById('jdSubmitBox');
+  if(submitBox){
+    submitBox.innerHTML = `<div class="text-center py-6">
+      <div class="w-16 h-16 mx-auto mb-3 rounded-full bg-green-100 flex items-center justify-center">
+        <i class="fa-solid fa-circle-check text-3xl text-green-600"></i>
+      </div>
+      <p class="font-extrabold text-slate-900 text-lg mb-1">আপনার কাজ সম্পন্ন হয়েছে</p>
+      <p class="text-sm text-slate-600 leading-relaxed">প্রুফ সফলভাবে জমা হয়েছে। Buyer/Admin রিভিউ করে Approve করলে আপনার Earning-এ টাকা যোগ হবে।</p>
+    </div>`;
+  }
+  toast('আপনার কাজ সম্পন্ন হয়েছে — প্রুফ জমা হয়েছে');
+  setTimeout(() => { goView('jobs'); if(typeof renderJobs==='function') renderJobs(); }, 1800);
 }
 
 
@@ -3155,10 +3214,12 @@ function doJob(title,price){
 function renderMyWork(){
   const body=document.getElementById('myWorkBody');
   const empty=document.getElementById('myWorkEmpty');
-  const tasks=currentUser.tasks||[];
+  // Only show last 1 month of task history
+  const tasks=(currentUser.tasks||[]).filter(t => !isOlderThanOneMonth(t));
   if(!tasks.length){body.innerHTML='';empty.classList.remove('hidden');return}
   empty.classList.add('hidden');
-  body.innerHTML=tasks.map((t, idx)=>{
+  body.innerHTML=tasks.map((t)=>{
+    const realIdx = (currentUser.tasks||[]).indexOf(t);
     const st = t.status || 'Approved';
     let stHtml = '';
     if(st==='Approved') stHtml = '<span class="text-green-600 font-bold">● Approved</span>';
@@ -3170,7 +3231,7 @@ function renderMyWork(){
       <td class="p-3">${stHtml}</td>
       <td class="p-3 font-bold text-green-600">${earn}</td>
       <td class="p-3">
-        <button onclick="reportTask(${idx})" class="bg-red-50 text-red-600 border border-red-200 text-[10px] px-2.5 py-1 rounded-lg font-semibold">Report</button>
+        <button onclick="reportTask(${realIdx})" class="bg-red-50 text-red-600 border border-red-200 text-[10px] px-2.5 py-1 rounded-lg font-semibold">Report</button>
         <br><span class="text-[10px] text-slate-400 mt-1 inline-block">${t.time||''}</span>
       </td>
     </tr>`;
@@ -3180,22 +3241,75 @@ function renderMyWork(){
 async function reportTask(idx){
   if(!currentUser || !currentUser.tasks || !currentUser.tasks[idx]) return;
   const t = currentUser.tasks[idx];
-  const reason = prompt('রিপোর্টের কারণ লিখুন (বাধ্যতামূলক):');
-  if(!reason || !reason.trim()) return toast('কারণ লিখুন','err');
-  const report = {
-    id: Date.now(), ts: Date.now(),
+  const jobKey = String(t.jobId || t.id || t.title || idx);
+  currentUser.reportedJobs = currentUser.reportedJobs || [];
+  if(currentUser.reportedJobs.includes(jobKey)){
+    return toast('আপনি এই কাজের জন্য ইতিমধ্যে রিপোর্ট করেছেন','err');
+  }
+  openReportModal({
     type: 'worker_report',
-    fromUserId: currentUser.userId,
-    fromName: currentUser.name,
+    jobKey,
     jobId: t.jobId || null,
     jobTitle: t.title,
     taskId: t.id || null,
-    reason: reason.trim(),
-    time: new Date().toLocaleString(),
-    status: 'Open'
-  };
-  try { if(window.fbAddReport) await window.fbAddReport(report); } catch(e){ console.error(e); }
-  toast('Report Admin-এর কাছে পাঠানো হয়েছে');
+    againstUserId: t.ownerId || null,
+    againstName: t.ownerName || 'Buyer'
+  });
+}
+
+function openReportModal(opts){
+  const old = document.getElementById('reportModal');
+  if(old) old.remove();
+  const html = `<div id="reportModal" class="fixed inset-0 z-[80] flex items-center justify-center p-4">
+    <div class="absolute inset-0 bg-black/50" onclick="document.getElementById('reportModal').remove()"></div>
+    <div class="relative bg-white rounded-3xl shadow-2xl w-full max-w-sm p-5 z-10">
+      <h3 class="font-bold text-lg text-slate-900 mb-1">রিপোর্ট করুন</h3>
+      <p class="text-xs text-slate-500 mb-3">${opts.jobTitle ? 'জব: ' + opts.jobTitle : 'রিপোর্টের কারণ লিখুন'}</p>
+      <textarea id="reportReasonInput" class="w-full border-2 border-slate-200 rounded-xl px-4 py-3 text-sm focus:outline-none focus:border-green-500 resize-none h-28 mb-4" placeholder="রিপোর্টের কারণ এখানে লিখুন..." maxlength="500"></textarea>
+      <div class="flex gap-2">
+        <button type="button" onclick="document.getElementById('reportModal').remove()" class="flex-1 py-2.5 rounded-xl bg-slate-100 text-slate-700 font-semibold text-sm">বাতিল</button>
+        <button type="button" id="reportSubmitBtn" class="flex-1 py-2.5 rounded-xl bg-red-600 hover:bg-red-700 text-white font-bold text-sm">রিপোর্ট পাঠান</button>
+      </div>
+    </div>
+  </div>`;
+  document.body.insertAdjacentHTML('beforeend', html);
+  const input = document.getElementById('reportReasonInput');
+  if(input){ input.value = ''; input.focus(); }
+  const btn = document.getElementById('reportSubmitBtn');
+  if(btn){
+    btn.onclick = async function(){
+      const reason = (document.getElementById('reportReasonInput')?.value || '').trim();
+      if(!reason) return toast('রিপোর্টের কারণ লিখুন','err');
+      if(!currentUser) return;
+      currentUser.reportedJobs = currentUser.reportedJobs || [];
+      if(opts.jobKey && currentUser.reportedJobs.includes(opts.jobKey)){
+        document.getElementById('reportModal')?.remove();
+        return toast('আপনি এই কাজের জন্য ইতিমধ্যে রিপোর্ট করেছেন','err');
+      }
+      const report = {
+        id: Date.now(), ts: Date.now(),
+        type: opts.type || 'worker_report',
+        fromUserId: currentUser.authUid || currentUser.userId,
+        fromName: currentUser.name,
+        againstUserId: opts.againstUserId || null,
+        againstName: opts.againstName || null,
+        jobId: opts.jobId || null,
+        jobTitle: opts.jobTitle || null,
+        taskId: opts.taskId || null,
+        submissionId: opts.submissionId || null,
+        reason: reason,
+        time: new Date().toLocaleString(),
+        status: 'Open'
+      };
+      try { if(window.fbAddReport) await window.fbAddReport(report); } catch(e){ console.error(e); }
+      if(opts.jobKey){
+        currentUser.reportedJobs.push(opts.jobKey);
+        try { await save(); } catch(e){}
+      }
+      document.getElementById('reportModal')?.remove();
+      toast('Report Admin-এর কাছে পাঠানো হয়েছে');
+    };
+  }
 }
 
 
@@ -3630,24 +3744,20 @@ async function reportSubmission(si){
   const job = currentUser.postedJobs[reviewJobIndex];
   if(!job || !job.submissions || !job.submissions[si]) return;
   const sub = job.submissions[si];
-  const reason = prompt('Admin-কে Report করার কারণ লিখুন:');
-  if(!reason || !reason.trim()) return toast('কারণ লিখুন','err');
-  const report = {
-    id: Date.now(), ts: Date.now(),
+  const jobKey = 'sub_' + String(job.id) + '_' + String(sub.id || si);
+  currentUser.reportedJobs = currentUser.reportedJobs || [];
+  if(currentUser.reportedJobs.includes(jobKey)){
+    return toast('আপনি এই কাজের জন্য ইতিমধ্যে রিপোর্ট করেছেন','err');
+  }
+  openReportModal({
     type: 'buyer_report',
-    fromUserId: currentUser.userId,
-    fromName: currentUser.name,
-    againstUserId: sub.workerId,
-    againstName: sub.workerName,
+    jobKey,
     jobId: job.id,
     jobTitle: job.title,
     submissionId: sub.id,
-    reason: reason.trim(),
-    time: new Date().toLocaleString(),
-    status: 'Open'
-  };
-  try { if(window.fbAddReport) await window.fbAddReport(report); } catch(e){ console.error(e); }
-  toast('Report Admin-এর কাছে পাঠানো হয়েছে');
+    againstUserId: sub.workerId,
+    againstName: sub.workerName
+  });
 }
 
 function applyModeUI(){
@@ -4329,29 +4439,67 @@ function isOlderThanOneMonth(item){
   return (Date.now() - t) > ONE_MONTH_MS;
 }
 
-/** Clean current user's local data older than 1 month */
+/** Clean current user's local data older than 1 month (keep profile/personal info forever) */
 function cleanUserOldData(u){
   if(!u) return false;
   let changed = false;
+  // Notices
   if(Array.isArray(u.notices)){
     const before = u.notices.length;
     u.notices = u.notices.filter(n => !isOlderThanOneMonth(n));
     if(u.notices.length !== before) changed = true;
   }
+  // Deposit history — keep Pending forever; delete processed ones older than 1 month
   if(Array.isArray(u.deposits)){
     const before = u.deposits.length;
-    u.deposits = u.deposits.filter(d => !isOlderThanOneMonth(d));
+    u.deposits = u.deposits.filter(d => {
+      const st = (d.status || 'Pending');
+      if(st === 'Pending') return true;
+      return !isOlderThanOneMonth(d);
+    });
     if(u.deposits.length !== before) changed = true;
   }
+  // Withdraw history — keep Pending forever; delete processed ones older than 1 month
   if(Array.isArray(u.withdraws)){
     const before = u.withdraws.length;
-    u.withdraws = u.withdraws.filter(w => !isOlderThanOneMonth(w));
+    u.withdraws = u.withdraws.filter(w => {
+      const st = (w.status || 'Pending');
+      if(st === 'Pending') return true;
+      return !isOlderThanOneMonth(w);
+    });
     if(u.withdraws.length !== before) changed = true;
   }
+  // Login history (also capped at 6 newest)
   if(Array.isArray(u.loginHistory)){
     const before = u.loginHistory.length;
-    u.loginHistory = u.loginHistory.filter(h => !isOlderThanOneMonth(h));
+    u.loginHistory = u.loginHistory.filter(h => !isOlderThanOneMonth(h)).slice(0, 6);
     if(u.loginHistory.length !== before) changed = true;
+  }
+  // Task / work history (My Works)
+  if(Array.isArray(u.tasks)){
+    const before = u.tasks.length;
+    u.tasks = u.tasks.filter(t => !isOlderThanOneMonth(t));
+    if(u.tasks.length !== before) changed = true;
+  }
+  // Ads history — keep Pending; delete processed older than 1 month
+  if(Array.isArray(u.ads)){
+    const before = u.ads.length;
+    u.ads = u.ads.filter(a => {
+      const st = a.status || 'Pending';
+      if(st === 'Pending') return true;
+      return !isOlderThanOneMonth(a);
+    });
+    if(u.ads.length !== before) changed = true;
+  }
+  // Buyer job submissions older than 1 month
+  if(Array.isArray(u.postedJobs)){
+    u.postedJobs.forEach(j => {
+      if(Array.isArray(j.submissions)){
+        const before = j.submissions.length;
+        j.submissions = j.submissions.filter(s => !isOlderThanOneMonth(s));
+        if(j.submissions.length !== before) changed = true;
+      }
+    });
   }
   return changed;
 }
@@ -4398,6 +4546,18 @@ async function adminCleanOldData(){
           try { await window.fbDeleteChat(c._docId); } catch(e){}
         }
       }
+    }
+    // Clean old reward claims
+    if(window.fbLoadRewardClaims && window.fbDb){
+      try {
+        const claims = await window.fbLoadRewardClaims();
+        const { deleteDoc, doc } = await import('https://www.gstatic.com/firebasejs/12.18.0/firebase-firestore.js');
+        for(const cl of (claims||[])){
+          if(isOlderThanOneMonth(cl) && cl._docId){
+            try { await deleteDoc(doc(window.fbDb, 'reward_claims', cl._docId)); } catch(e){}
+          }
+        }
+      } catch(e){}
     }
   } catch(e){ console.error('adminCleanOldData', e); }
 }
@@ -5144,7 +5304,10 @@ function renderAdminDeposits(){
   let items = [];
   Object.values(users).forEach(u=>{
     (u.deposits||[]).forEach((d,idx)=>{
-      items.push({...d, _uid:u.userId, _idx:idx, userName:u.name});
+      // Pending always show; others only last 1 month
+      const st = d.status || 'Pending';
+      if(st !== 'Pending' && isOlderThanOneMonth(d)) return;
+      items.push({...d, _uid:u.userId || u.authUid, _idx:idx, userName:u.name});
     });
   });
   items.sort((a,b)=>(b.time||'').localeCompare(a.time||''));
@@ -5220,7 +5383,10 @@ function renderAdminWithdraws(){
   let items = [];
   Object.values(users).forEach(u=>{
     (u.withdraws||[]).forEach((w,idx)=>{
-      items.push({...w, _uid:u.userId, _idx:idx, userName:u.name});
+      // Pending always show; others only last 1 month
+      const st = w.status || 'Pending';
+      if(st !== 'Pending' && isOlderThanOneMonth(w)) return;
+      items.push({...w, _uid:u.userId || u.authUid, _idx:idx, userName:u.name});
     });
   });
   items.sort((a,b)=>(b.time||'').localeCompare(a.time||''));
@@ -5368,18 +5534,55 @@ function renderAdminJobs(){
     const pinCls = j.pinned ? 'bg-amber-100 text-amber-800' : 'bg-blue-100 text-blue-700';
     const pinBadge = j.pinned ? '<span class="text-[10px] bg-amber-100 text-amber-700 px-2 py-0.5 rounded-full font-bold ml-1">PINNED</span>' : '';
     return `<div class="bg-white rounded-2xl border border-slate-200 p-4 shadow-sm ${j.pinned?'ring-1 ring-amber-200':''}">
-      <div class="flex justify-between mb-1">
-        <p class="font-bold text-slate-900 text-sm">${j.title}${pinBadge}</p>
+      <div class="flex justify-between mb-1 cursor-pointer" onclick="adminShowJobDetail(${realIdx})">
+        <p class="font-bold text-slate-900 text-sm hover:text-green-700">${j.title}${pinBadge}</p>
         <span class="text-green-600 font-bold">৳${Number(j.price).toFixed(2)}</span>
       </div>
       <p class="text-xs text-slate-500 mb-2">${j.done||0}/${j.total||0} • ${j.category||''} • ${j.zone||''} • Owner: ${j.ownerId||'System'}</p>
       <span class="text-[10px] font-bold px-2 py-0.5 rounded-full bg-green-100 text-green-700 mb-2 inline-block">Active / Running</span>
-      <div class="flex gap-2">
+      <div class="flex flex-wrap gap-2">
+        <button onclick="adminShowJobDetail(${realIdx})" class="text-[11px] px-3 py-1.5 rounded-lg font-semibold bg-slate-100 text-slate-700"><i class="fa-solid fa-eye"></i> Details</button>
         <button onclick="adminConfirm('এই Job Delete করবেন?',()=>adminDeleteJob(${realIdx}))" class="text-[11px] px-3 py-1.5 rounded-lg font-semibold bg-red-100 text-red-600">Delete</button>
         <button onclick="adminTogglePinJob(${realIdx})" class="text-[11px] px-3 py-1.5 rounded-lg font-semibold ${pinCls}"><i class="fa-solid fa-thumbtack"></i> ${pinLabel}</button>
       </div>
     </div>`;
   }).join('');
+}
+
+function adminShowJobDetail(i){
+  const j = JOBS[i];
+  if(!j) return toast('Job পাওয়া যায়নি','err');
+  const steps = (j.steps && j.steps.length) ? j.steps.map((s,n)=> (n+1)+'. '+s).join('\n') : '—';
+  const proof = j.proof || '—';
+  const html = `<div class="fixed inset-0 z-[80] flex items-center justify-center p-4" id="adminJobDetailModal">
+    <div class="absolute inset-0 bg-black/50" onclick="document.getElementById('adminJobDetailModal').remove()"></div>
+    <div class="relative bg-white rounded-3xl shadow-2xl w-full max-w-md max-h-[85vh] overflow-y-auto p-5 z-10">
+      <div class="flex justify-between items-start mb-3">
+        <h3 class="font-bold text-lg text-slate-900 pr-4">${j.title||'Job'}</h3>
+        <button onclick="document.getElementById('adminJobDetailModal').remove()" class="text-slate-400 text-xl">&times;</button>
+      </div>
+      <div class="space-y-2 text-sm">
+        <p><span class="text-slate-400 font-medium">Job ID:</span> <span class="font-mono font-semibold">${j.id||'—'}</span></p>
+        <p><span class="text-slate-400 font-medium">Price:</span> <span class="text-green-600 font-bold">৳${Number(j.price||0).toFixed(2)}</span></p>
+        <p><span class="text-slate-400 font-medium">Progress:</span> ${(j.done||0)} / ${(j.total||j.workers||0)}</p>
+        <p><span class="text-slate-400 font-medium">Category:</span> ${j.category||'—'}</p>
+        <p><span class="text-slate-400 font-medium">Location:</span> ${j.zone||'—'}</p>
+        <p><span class="text-slate-400 font-medium">Owner:</span> <span class="font-mono text-xs break-all">${j.ownerId||'System'}</span></p>
+        <p><span class="text-slate-400 font-medium">Screenshots needed:</span> ${j.screens||0}</p>
+        <p><span class="text-slate-400 font-medium">Est. Days:</span> ${j.estDays||3}</p>
+        <div class="bg-slate-50 rounded-xl p-3 mt-2">
+          <p class="text-xs font-bold text-slate-500 uppercase mb-1">What buyer expects (Steps)</p>
+          <p class="text-sm text-slate-800 whitespace-pre-wrap leading-relaxed">${steps}</p>
+        </div>
+        <div class="bg-slate-50 rounded-xl p-3">
+          <p class="text-xs font-bold text-slate-500 uppercase mb-1">Required Proof</p>
+          <p class="text-sm text-slate-800 whitespace-pre-wrap leading-relaxed">${proof}</p>
+        </div>
+      </div>
+      <button onclick="document.getElementById('adminJobDetailModal').remove()" class="mt-4 w-full py-2.5 rounded-xl bg-slate-100 font-semibold text-sm">Close</button>
+    </div>
+  </div>`;
+  document.body.insertAdjacentHTML('beforeend', html);
 }
 async function adminDeleteJob(i){
   if(!confirm('Delete this job?')) return;
@@ -5412,6 +5615,12 @@ async function renderAdminReports(){
   let reports = [];
   try { reports = window.fbLoadReports ? await window.fbLoadReports() : []; } catch(e){ reports = []; }
   _adminReportsCache = reports;
+  // Open reports always show; closed ones only last 1 month
+  reports = (reports || []).filter(r => {
+    const st = (r.status || 'Open');
+    if(st === 'Open' || st === 'Warned') return true;
+    return !isOlderThanOneMonth(r);
+  });
   const q = (document.getElementById('adminSearchReports')?.value || '').trim().toLowerCase();
   if(q) reports = reports.filter(r => JSON.stringify(r).toLowerCase().includes(q));
 
@@ -5422,15 +5631,28 @@ async function renderAdminReports(){
     const id = r._docId || '';
     const typeLabel = r.type === 'buyer_report' ? 'Buyer Report' : 'User/Worker Report';
     const typeColor = r.type === 'buyer_report' ? 'bg-purple-100 text-purple-700' : 'bg-blue-100 text-blue-700';
+    const againstId = r.againstUserId || '';
+    const fromId = r.fromUserId || '';
+    const safeAgainst = String(againstId).replace(/'/g, "\\'");
+    const safeFrom = String(fromId).replace(/'/g, "\\'");
+    const safeId = String(id).replace(/'/g, "\\'");
     return `<div class="bg-white rounded-2xl border border-slate-200 p-4 shadow-sm">
       <div class="flex justify-between items-start mb-1">
         <p class="font-bold text-slate-900 text-sm">${r.fromName||'—'}</p>
         <span class="text-[10px] font-bold px-2 py-0.5 rounded-full ${typeColor}">${typeLabel}</span>
       </div>
-      <p class="text-xs text-slate-500">Against: <b>${r.againstName||'-'}</b> • Job: ${r.jobTitle||'-'}</p>
-      <p class="text-sm mt-2 bg-slate-50 p-2 rounded-lg">${r.reason||''}</p>
+      <div class="text-xs text-slate-600 space-y-1 mt-2 bg-slate-50 rounded-xl p-3">
+        <p><span class="text-slate-400 font-medium">Reporter:</span> <b>${r.fromName||'—'}</b> <span class="font-mono text-[10px] text-slate-500">(${fromId||'—'})</span></p>
+        <p><span class="text-slate-400 font-medium">Against:</span> <b>${r.againstName||'—'}</b> <span class="font-mono text-[10px] text-slate-500">(${againstId||'—'})</span></p>
+        <p><span class="text-slate-400 font-medium">Job:</span> ${r.jobTitle||'—'} ${r.jobId ? '<span class="font-mono text-[10px]">#'+r.jobId+'</span>' : ''}</p>
+      </div>
+      <p class="text-sm mt-2 bg-amber-50 border border-amber-100 p-2.5 rounded-xl text-slate-800">${r.reason||''}</p>
       <p class="text-[10px] text-slate-400 mt-1">${r.time||''} • Status: <b>${r.status||'Open'}</b></p>
-      <button onclick="adminCloseReport('${id}')" class="mt-2 text-[11px] px-3 py-1.5 rounded-lg font-semibold bg-slate-100 text-slate-600">Close</button>
+      <div class="flex flex-wrap gap-2 mt-3">
+        ${againstId ? `<button onclick="adminReportWarn('${safeAgainst}','${safeId}')" class="text-[11px] px-3 py-1.5 rounded-lg font-semibold bg-amber-100 text-amber-800"><i class="fa-solid fa-bell"></i> Notice</button>
+        <button onclick="adminReportSuspend('${safeAgainst}','${safeId}')" class="text-[11px] px-3 py-1.5 rounded-lg font-semibold bg-red-100 text-red-600"><i class="fa-solid fa-ban"></i> Suspend</button>` : ''}
+        <button onclick="adminCloseReport('${safeId}')" class="text-[11px] px-3 py-1.5 rounded-lg font-semibold bg-slate-100 text-slate-600">Close</button>
+      </div>
     </div>`;
   };
 
@@ -5446,6 +5668,60 @@ async function adminCloseReport(docId){
   try { if(window.fbUpdateReport) await window.fbUpdateReport(docId, { status: 'Closed' }); } catch(e){ console.error(e); }
   renderAdminReports();
   toast('Report closed');
+}
+
+async function adminReportWarn(userId, reportDocId){
+  if(!userId) return toast('User ID নেই','err');
+  let u = users[userId] || Object.values(users||{}).find(x => x.authUid === userId || x.userId === userId);
+  if(!u && window.fbLoadUser){ try { u = await window.fbLoadUser(userId); } catch(e){} }
+  if(!u && window.fbFindUserByUserId){ try { u = await window.fbFindUserByUserId(userId); } catch(e){} }
+  if(!u) return toast('ইউজার পাওয়া যায়নি','err');
+  const msg = prompt('সতর্কবার্তা লিখুন (ইউজার নোটিফিকেশনে পাবে):', 'আপনার অ্যাকাউন্টে রিপোর্ট এসেছে। নিয়ম মেনে কাজ করুন, নাহলে অ্যাকাউন্ট সাসপেন্ড হতে পারে।');
+  if(msg === null) return;
+  const body = (msg||'').trim() || 'আপনার বিরুদ্ধে রিপোর্ট এসেছে। সতর্ক থাকুন।';
+  u.notices = u.notices || [];
+  u.notices.unshift({
+    id: Date.now(),
+    title: '⚠️ সতর্কবার্তা (Admin)',
+    body: body,
+    time: new Date().toLocaleString()
+  });
+  if(u.userId) users[u.userId] = u;
+  if(u.authUid) users[u.authUid] = u;
+  if(window.fbSaveUser && u.authUid){ try { await window.fbSaveUser(u); } catch(e){} }
+  if(reportDocId && window.fbUpdateReport){
+    try { await window.fbUpdateReport(reportDocId, { status: 'Warned' }); } catch(e){}
+  }
+  renderAdminReports();
+  toast('সতর্কবার্তা পাঠানো হয়েছে');
+}
+
+async function adminReportSuspend(userId, reportDocId){
+  if(!userId) return toast('User ID নেই','err');
+  if(!confirm('এই ইউজারকে Suspend করবেন?')) return;
+  let u = users[userId] || Object.values(users||{}).find(x => x.authUid === userId || x.userId === userId);
+  if(!u && window.fbLoadUser){ try { u = await window.fbLoadUser(userId); } catch(e){} }
+  if(!u && window.fbFindUserByUserId){ try { u = await window.fbFindUserByUserId(userId); } catch(e){} }
+  if(!u) return toast('ইউজার পাওয়া যায়নি','err');
+  u.banned = true;
+  u.banDate = new Date().toLocaleString();
+  u.notices = u.notices || [];
+  u.notices.unshift({
+    id: Date.now(),
+    title: 'অ্যাকাউন্ট সাসপেন্ড',
+    body: 'রিপোর্টের কারণে আপনার অ্যাকাউন্ট সাসপেন্ড করা হয়েছে। সাপোর্টে যোগাযোগ করুন।',
+    time: new Date().toLocaleString()
+  });
+  if(u.userId) users[u.userId] = u;
+  if(u.authUid) users[u.authUid] = u;
+  if(window.fbSaveUser && u.authUid){ try { await window.fbSaveUser(u); } catch(e){} }
+  if(reportDocId && window.fbUpdateReport){
+    try { await window.fbUpdateReport(reportDocId, { status: 'Action Taken' }); } catch(e){}
+  }
+  if(typeof renderAdminUsers === 'function') renderAdminUsers();
+  if(typeof renderAdminSuspended === 'function') renderAdminSuspended();
+  renderAdminReports();
+  toast('User Suspended');
 }
 
 function adminBroadcast(){
@@ -5538,7 +5814,10 @@ function renderAdminAds(){
   let items = [];
   Object.values(users).forEach(u=>{
     (u.ads||[]).forEach((a,idx)=>{
-      items.push({...a, _uid:u.userId, _idx:idx, userName:u.name||a.userName});
+      // Pending always show; others only last 1 month
+      const st = a.status || 'Pending';
+      if(st !== 'Pending' && isOlderThanOneMonth(a)) return;
+      items.push({...a, _uid:u.userId || u.authUid, _idx:idx, userName:u.name||a.userName});
     });
   });
   items.sort((a,b)=>(b.time||'').localeCompare(a.time||''));
@@ -6083,7 +6362,12 @@ async function renderAdminRewards(){
 
   const el = document.getElementById('adminRewardClaims');
   if(!el) return;
-  const claims = getRewardClaims();
+  // Pending always; processed only last 1 month
+  const claims = (getRewardClaims() || []).filter(cl => {
+    const st = cl.status || 'Pending';
+    if(st === 'Pending') return true;
+    return !isOlderThanOneMonth(cl);
+  });
   if(!claims.length){ el.innerHTML='<p class="text-slate-400 text-center py-6 text-sm">No claims yet</p>'; return; }
   el.innerHTML = claims.map((cl,i)=>{
     const st = cl.status||'Pending';
@@ -6979,7 +7263,7 @@ Support: Live Chat inside the app</textarea>
   console.log("Firebase Auth + Firestore ready (full)");
 </script>
 
-
+<script src="app-banner.js"></script>
 
 </body>
 </html>
