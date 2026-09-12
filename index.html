@@ -253,6 +253,19 @@ body.dark-theme .side-item:hover,body.dark-theme .side-item.active{background:#0
 </style>
 </head>
 <body class="min-h-screen">
+<script>
+/* Prevent home-page flash on refresh when user was on dashboard */
+(function(){
+  try {
+    var v = sessionStorage.getItem('sp_lastView');
+    var a = Number(sessionStorage.getItem('sp_lastActive') || 0);
+    var ok = v && a && (Date.now() - a) < (3 * 60 * 60 * 1000);
+    if(ok){
+      document.write('<style id="sp-boot-hide">#landing{display:none!important}</style>');
+    }
+  } catch(e){}
+})();
+</script>
 <div id="toastBox" class="fixed top-4 right-4 z-[100] space-y-2 max-w-xs"></div>
 
 <!-- LANDING / HOME -->
@@ -1144,6 +1157,9 @@ body.dark-theme .side-item:hover,body.dark-theme .side-item.active{background:#0
       <label class="block text-sm font-semibold text-slate-700 mb-1">Sender Number</label>
       <input type="text" id="depSender" class="input-f mb-3" placeholder="আপনার bKash/Nagad নম্বর" maxlength="11">
 
+      <label class="block text-sm font-semibold text-slate-700 mb-1">Transaction ID</label>
+      <input type="text" id="depTxnId" class="input-f mb-3" placeholder="bKash/Nagad Transaction ID লিখুন" maxlength="40">
+
       <label class="block text-sm font-semibold text-slate-700 mb-1">Deposit Amount (৳)</label>
       <input type="number" id="depAmount" class="input-f mb-2" placeholder="Min ৳500" min="500" step="1" oninput="calcDep()">
 
@@ -1876,8 +1892,45 @@ let currentUser = null;
 // Only real jobs (posted by buyers). No fake demo jobs.
 const JOBS = [];
 const STARTER_CATEGORIES = ['Gmail Account', 'Telegram']; // locked users only see these
-const UNLOCK_EARN_NEED = 500;
+// Dynamic site limits — Admin Settings থেকে পরিবর্তনযোগ্য
+window._unlockNeed = 500;
+window._depMin = 500;
+window._wdMin = 500;
+function getUnlockNeed(){ return Number(window._unlockNeed) || 500; }
+function getDepMin(){ return Number(window._depMin) || 500; }
+function getWdMin(){ return Number(window._wdMin) || 500; }
+const UNLOCK_EARN_NEED = 500; // fallback only — use getUnlockNeed()
 const UNLOCK_BONUS = 50;
+
+/* ===== 3-hour inactivity auto-logout ===== */
+const INACTIVITY_LIMIT_MS = 3 * 60 * 60 * 1000; // 3 hours
+function touchActivity(){
+  try { sessionStorage.setItem('sp_lastActive', String(Date.now())); } catch(e){}
+  if(currentUser) currentUser.lastActive = Date.now();
+}
+function getLastActivity(){
+  try {
+    const s = Number(sessionStorage.getItem('sp_lastActive') || 0);
+    if(s) return s;
+  } catch(e){}
+  return (currentUser && currentUser.lastActive) ? Number(currentUser.lastActive) : 0;
+}
+function checkInactivityLogout(){
+  if(!currentUser) return;
+  const last = getLastActivity();
+  if(last > 0 && (Date.now() - last) > INACTIVITY_LIMIT_MS){
+    toast('৩ ঘণ্টা অ্যাকটিভ না থাকায় অটো লগআউট হয়েছে','err');
+    doLogout();
+  }
+}
+function startInactivityWatcher(){
+  ['click','keydown','scroll','touchstart','mousemove'].forEach(ev=>{
+    document.addEventListener(ev, ()=>{ touchActivity(); }, { passive: true });
+  });
+  touchActivity();
+  if(window._inactTimer) clearInterval(window._inactTimer);
+  window._inactTimer = setInterval(checkInactivityLogout, 60 * 1000); // every 1 min
+}
 
 /* ===== Cloudinary (unsigned upload) ===== */
 const CLOUDINARY_CLOUD = 'cjksj4fo';
@@ -2210,7 +2263,9 @@ function showAuth(m){
   document.getElementById('forgotView').classList.toggle('hidden', m!=='forgot');
 }
 function showLanding(){
-  document.getElementById('landing').classList.remove('hidden');
+  try { document.getElementById('sp-boot-hide')?.remove(); } catch(e){}
+  const land = document.getElementById('landing');
+  if(land){ land.style.display = ''; land.classList.remove('hidden'); }
   document.getElementById('authSection').classList.add('hidden');
   document.getElementById('dashboard').classList.add('hidden');
   const ap = document.getElementById('adminPanel'); if(ap) ap.classList.add('hidden');
@@ -2322,7 +2377,7 @@ async function doLogin(){
     if(!currentUser.notices) currentUser.notices = [];
     if(currentUser.chatUnread === undefined) currentUser.chatUnread = false;
     if(currentUser.totalEarned === undefined) currentUser.totalEarned = currentUser.earned || 0;
-    if(currentUser.jobsUnlocked === undefined) currentUser.jobsUnlocked = (currentUser.totalEarned||0) >= UNLOCK_EARN_NEED;
+    if(currentUser.jobsUnlocked === undefined) currentUser.jobsUnlocked = (currentUser.totalEarned||0) >= getUnlockNeed();
     if(!currentUser.role) currentUser.role = 'user';
     if(currentUser.banned === undefined) currentUser.banned = false;
 
@@ -2357,8 +2412,10 @@ async function doLogin(){
     if(currentUser.banned){
       toast('আপনার অ্যাকাউন্ট Suspended। Appeal দিতে পারেন।','err');
     }
+    touchActivity();
     if(currentUser.role === 'admin'){
       initAdmin();
+      startInactivityWatcher();
     } else {
       initDash();
     }
@@ -2427,7 +2484,12 @@ async function doForgot(){
 async function doLogout(){
   currentUser=null;
   try { if(window.fbLogout) await window.fbLogout(); } catch(e) {}
-  /* no local session key */
+  try {
+    sessionStorage.removeItem('sp_lastActive');
+    sessionStorage.removeItem('sp_lastView');
+    window._lastView = null;
+  } catch(e){}
+  if(window._inactTimer){ clearInterval(window._inactTimer); window._inactTimer = null; }
   showLanding();
   const ap = document.getElementById('adminPanel');
   if(ap) ap.classList.add('hidden');
@@ -2438,6 +2500,7 @@ async function doLogout(){
 
 
 function initDash(){
+  try { document.getElementById('sp-boot-hide')?.remove(); } catch(e){}
   document.getElementById('landing').classList.add('hidden');
   document.getElementById('authSection').classList.add('hidden');
   document.getElementById('dashboard').classList.remove('hidden');
@@ -2455,7 +2518,7 @@ function initDash(){
     applySuspendedLock();
   } else {
     let lastView = null;
-    try { lastView = window._lastView || null; } catch(e){}
+    try { lastView = sessionStorage.getItem('sp_lastView') || window._lastView || null; } catch(e){}
     if(currentUser && (currentUser.mode||'Worker')==='Buyer'){
       if(lastView === 'jobs' || lastView === 'jobdetail') lastView = 'myjobs';
       goView(lastView || 'myjobs');
@@ -2466,6 +2529,8 @@ function initDash(){
   updateNotifyBadge();
   updateChatBadge();
   startUserChatListener();
+  startInactivityWatcher();
+  touchActivity();
 }
 
 /** Suspended user: lock all features except Profile + Appeal */
@@ -2723,7 +2788,10 @@ function goView(v){
   if(t)t.classList.remove('hidden');
 
   // Persist current page so refresh keeps the same view
-  try { window._lastView = v; } catch(e){}
+  try {
+    window._lastView = v;
+    sessionStorage.setItem('sp_lastView', v);
+  } catch(e){}
 
   if(v==='jobs')renderJobs();
   if(v==='mywork')renderMyWork();
@@ -2858,8 +2926,8 @@ let currentJob = null;
 function isJobsUnlocked(u){
   if(!u) return false;
   if(u.jobsUnlocked) return true;
-  // Once lifetime earned reaches 500 → permanent unlock
-  if((u.totalEarned||0) >= UNLOCK_EARN_NEED) {
+  // Once lifetime earned reaches unlock threshold → permanent unlock
+  if((u.totalEarned||0) >= getUnlockNeed()) {
     u.jobsUnlocked = true;
     return true;
   }
@@ -2871,13 +2939,14 @@ function isJobsUnlocked(u){
 function checkAndUnlockByEarning(){
   if(!currentUser) return;
   if(currentUser.jobsUnlocked) return;
-  if((currentUser.totalEarned||0) >= UNLOCK_EARN_NEED){
+  const need = getUnlockNeed();
+  if((currentUser.totalEarned||0) >= need){
     currentUser.jobsUnlocked = true;
     currentUser.notices = currentUser.notices || [];
     currentUser.notices.unshift({
       id: Date.now(),
       title: 'সব কাজ আনলক!',
-      body: 'আপনার Earning ৳৫০০ পূর্ণ হয়েছে। এখন সব কাজ দেখতে ও করতে পারবেন। (একবারই unlock হয়)',
+      body: 'আপনার Earning ৳'+need+' পূর্ণ হয়েছে। এখন সব কাজ দেখতে ও করতে পারবেন। (একবারই unlock হয়)',
       time: 'Just now'
     });
     save();
@@ -2970,7 +3039,7 @@ function openJobDetail(id){
   if(currentUser && !isJobsUnlocked(currentUser)){
     const cat = (j.category||'').toLowerCase();
     const allowed = STARTER_CATEGORIES.some(c => cat.includes(c.toLowerCase()) || c.toLowerCase().includes(cat));
-    if(!allowed) return toast('এই কাজ আনলক নেই। ৳৫০০ Earning প্রয়োজন।','err');
+    if(!allowed) return toast('এই কাজ আনলক নেই। ৳'+getUnlockNeed()+' Earning প্রয়োজন।','err');
   }
   currentJob = j;
   const pct=Math.min(100,(j.done/j.total)*100);
@@ -3737,11 +3806,11 @@ function approveSubmission(si){
     const task = worker.tasks.find(t => t.id === sub.id);
     if(task){ task.status = 'Approved'; }
     else worker.tasks.unshift({id:sub.id, jobId:job.id, title:job.title, status:'Approved', earned:sub.earned, time:sub.time});
-    // auto unlock if lifetime earn >= 500
-    if(!worker.jobsUnlocked && (worker.totalEarned||0) >= UNLOCK_EARN_NEED){
+    // auto unlock if lifetime earn >= unlock threshold
+    if(!worker.jobsUnlocked && (worker.totalEarned||0) >= getUnlockNeed()){
       worker.jobsUnlocked = true;
       worker.notices = worker.notices || [];
-      worker.notices.unshift({id:Date.now()+2, ts:Date.now(), title:'সব কাজ আনলক!', body:'আপনার Earning ৳৫০০ পূর্ণ হয়েছে। এখন সব কাজ দেখতে ও করতে পারবেন। (একবারই unlock হয়)', time:new Date().toLocaleString()});
+      worker.notices.unshift({id:Date.now()+2, ts:Date.now(), title:'সব কাজ আনলক!', body:'আপনার Earning ৳'+getUnlockNeed()+' পূর্ণ হয়েছে। এখন সব কাজ দেখতে ও করতে পারবেন। (একবারই unlock হয়)', time:new Date().toLocaleString()});
     }
     // No "Proof Approved" notification — worker can see status in My Works
     if(window.fbSaveUser && worker.authUid) window.fbSaveUser(worker);
@@ -3942,16 +4011,21 @@ function copyMerchant(){
 function onDepPurposeChange(){
   const purpose = document.querySelector('input[name="depPurpose"]:checked')?.value || 'buyer';
   const amtInput = document.getElementById('depAmount');
+  const unlockNeed = getUnlockNeed();
   if(purpose === 'unlock'){
-    if(amtInput){ amtInput.value = '500'; amtInput.readOnly = true; }
+    if(amtInput){ amtInput.value = String(unlockNeed); amtInput.readOnly = true; }
   } else {
-    if(amtInput){ amtInput.readOnly = false; if(amtInput.value === '500') amtInput.value = ''; }
+    if(amtInput){
+      amtInput.readOnly = false;
+      if(amtInput.value === String(unlockNeed) || amtInput.value === '500') amtInput.value = '';
+    }
   }
   calcDep();
 }
 
 function renderDeposit(){
   if(!currentUser) return;
+  if(typeof applySiteLimitsToUI === 'function') applySiteLimitsToUI();
   const n=document.getElementById('depAutoName');
   const e=document.getElementById('depAutoEmail');
   const u=document.getElementById('depAutoUid');
@@ -3979,7 +4053,7 @@ function renderDeposit(){
 function calcDep(){
   const purpose = document.querySelector('input[name="depPurpose"]:checked')?.value || 'buyer';
   let amt=parseFloat(document.getElementById('depAmount')?.value)||0;
-  if(purpose === 'unlock') amt = 500;
+  if(purpose === 'unlock') amt = getUnlockNeed();
   const fee = amt * 0.02;
   const total = amt + fee;
   const feeEl=document.getElementById('depFeeShow');
@@ -3993,11 +4067,15 @@ async function submitDep(){
   const purpose = document.querySelector('input[name="depPurpose"]:checked')?.value || 'buyer';
   const method = document.querySelector('input[name="depMethod"]:checked')?.value || 'bKash';
   const sender = (document.getElementById('depSender')?.value || '').trim();
+  const txnId = (document.getElementById('depTxnId')?.value || '').trim();
   let amt=parseFloat(document.getElementById('depAmount')?.value);
   const fileInput = document.getElementById('depScreenshot');
+  const depMin = getDepMin();
+  const unlockNeed = getUnlockNeed();
   if(!/^01[3-9]\d{8}$/.test(sender)) return toast('সঠিক Sender Number দিন','err');
-  if(purpose === 'unlock') amt = 500;
-  if(!amt||amt<500) return toast('Min deposit ৳500','err');
+  if(!txnId || txnId.length < 6) return toast('সঠিক Transaction ID দিন','err');
+  if(purpose === 'unlock') amt = unlockNeed;
+  if(!amt||amt<depMin) return toast('Min deposit ৳'+depMin,'err');
   if(!document.getElementById('depTerms')?.checked) return toast('Terms agree করুন','err');
   if(!fileInput?.files?.length) return toast('Screenshot প্রমাণ দিন','err');
   if(typeof isValidImageFile==='function' && !isValidImageFile(fileInput.files[0])) return toast('শুধুমাত্র JPG, PNG বা WEBP ফাইল দিন','err');
@@ -4026,6 +4104,7 @@ async function submitDep(){
     method: method,
     purpose: purpose,
     sender: sender,
+    txnId: txnId,
     name: currentUser.name,
     email: currentUser.email,
     userId: currentUser.authUid || currentUser.userId,
@@ -4041,6 +4120,7 @@ async function submitDep(){
   updateUI();
   document.getElementById('depAmount').value='';
   document.getElementById('depSender').value='';
+  document.getElementById('depTxnId').value='';
   if(fileInput) fileInput.value='';
   const buyerRadio = document.querySelector('input[name="depPurpose"][value="buyer"]');
   if(buyerRadio) buyerRadio.checked = true;
@@ -4112,7 +4192,8 @@ function submitWithdraw(){
   const totalDeduct = amt + totalFee;
 
   if(!/^01[3-9]\d{8}$/.test(account)) return toast('সঠিক '+method+' নম্বর দিন (01XXXXXXXXX)','err');
-  if(amt < 500) return toast('সর্বনিম্ন উইথড্র ৳500','err');
+  const wdMin = getWdMin();
+  if(amt < wdMin) return toast('সর্বনিম্ন উইথড্র ৳'+wdMin,'err');
   if(amt > 10000) return toast('সর্বোচ্চ উইথড্র ৳10,000','err');
   if(totalDeduct > (currentUser.earned||0)) return toast('পর্যাপ্ত ব্যালেন্স নেই। প্রয়োজন ৳'+totalDeduct.toFixed(2),'err');
 
@@ -4810,14 +4891,17 @@ function startJobsLiveListener(){
 
 async function liveRefreshExtras(){
   try {
-    // Settings (deposit numbers, unlock threshold)
+    // Settings (deposit numbers, unlock/deposit/withdraw limits)
     if(window.fbLoadSettings){
       const s = await window.fbLoadSettings();
       if(s){
         if(s.bkashNo) DEP_NUMBERS.bKash = s.bkashNo;
         if(s.nagadNo) DEP_NUMBERS.Nagad = s.nagadNo;
-        if(s.unlockNeed) window._unlockNeed = s.unlockNeed;
+        if(s.unlockNeed != null) window._unlockNeed = Number(s.unlockNeed) || 500;
+        if(s.depMin != null) window._depMin = Number(s.depMin) || 500;
+        if(s.wdMin != null) window._wdMin = Number(s.wdMin) || 500;
         if(typeof onDepMethodChange === 'function') onDepMethodChange();
+        if(typeof applySiteLimitsToUI === 'function') applySiteLimitsToUI();
       }
     }
     // Site content / notices
@@ -4868,7 +4952,34 @@ document.addEventListener('DOMContentLoaded', async ()=>{
 
   try { await applyDepositNumbersFromSettings(); } catch(e){}
 
+  // Load site limits early so deposit/withdraw/unlock use admin values
+  try {
+    if(window.fbLoadSettings){
+      const s = await window.fbLoadSettings();
+      if(s){
+        if(s.unlockNeed != null) window._unlockNeed = Number(s.unlockNeed) || 500;
+        if(s.depMin != null) window._depMin = Number(s.depMin) || 500;
+        if(s.wdMin != null) window._wdMin = Number(s.wdMin) || 500;
+        if(s.bkashNo) DEP_NUMBERS.bKash = s.bkashNo;
+        if(s.nagadNo) DEP_NUMBERS.Nagad = s.nagadNo;
+      }
+    }
+    if(typeof applySiteLimitsToUI === 'function') applySiteLimitsToUI();
+  } catch(e){}
+
   if(window._fbPendingUser) {
+    // 3-hour inactivity: if last activity too old, force login again
+    let lastAct = 0;
+    try { lastAct = Number(sessionStorage.getItem('sp_lastActive') || 0); } catch(e){}
+    if(lastAct > 0 && (Date.now() - lastAct) > INACTIVITY_LIMIT_MS){
+      try { sessionStorage.removeItem('sp_lastActive'); sessionStorage.removeItem('sp_lastView'); } catch(e){}
+      try { if(window.fbLogout) await window.fbLogout(); } catch(e){}
+      window._fbPendingUser = null;
+      currentUser = null;
+      showLanding();
+      showAuth('login');
+      toast('৩ ঘণ্টা অ্যাকটিভ না থাকায় লগআউট হয়েছে। আবার লগইন করুন।','err');
+    } else {
     currentUser = window._fbPendingUser;
     window._fbPendingUser = null;
     if(!currentUser.role) currentUser.role = 'user';
@@ -4887,9 +4998,12 @@ document.addEventListener('DOMContentLoaded', async ()=>{
     } catch(e) {}
     if(currentUser.role === 'admin') {
       initAdmin();
+      startInactivityWatcher();
+      touchActivity();
     } else {
       initDash();
       if(currentUser.banned) applySuspendedLock();
+    }
     }
   } else {
     showLanding();
@@ -4937,6 +5051,7 @@ function adminConfirm(message, onOk){
 }
 
 async function initAdmin(){
+  try { document.getElementById('sp-boot-hide')?.remove(); } catch(e){}
   document.getElementById('landing').classList.add('hidden');
   document.getElementById('authSection').classList.add('hidden');
   document.getElementById('dashboard').classList.add('hidden');
@@ -5066,6 +5181,9 @@ function adminGo(view){
   if(view==='content') loadSiteContentForm();
   if(view==='settings') loadAdminSettingsForm();
   if(view==='overview') loadAdminStats();
+  if(view==='notices'){
+    loadBroadcastHistory().then(() => renderBroadcastHistory());
+  }
 }
 
 
@@ -5232,18 +5350,75 @@ function adminUserCard(u, opts){
       </div>
       ${verBadge}
     </div>
-    <div class="grid grid-cols-2 sm:grid-cols-4 gap-2 text-xs mb-3">
+    <div class="grid grid-cols-2 gap-2 text-xs mb-3">
       <div class="bg-slate-50 rounded-lg p-2 text-center"><p class="text-slate-400">Earning</p><p class="font-bold text-green-600">৳${Number(u.earned||0).toFixed(0)}</p></div>
-      <div class="bg-slate-50 rounded-lg p-2 text-center"><p class="text-slate-400">Deposit</p><p class="font-bold text-slate-800">৳${Number(u.deposited||0).toFixed(0)}</p></div>
-      <div class="bg-slate-50 rounded-lg p-2 text-center"><p class="text-slate-400">Tasks</p><p class="font-bold">${(u.tasks||[]).length}</p></div>
-      <div class="bg-slate-50 rounded-lg p-2 text-center"><p class="text-slate-400">Mode</p><p class="font-bold">${u.mode||'Worker'}</p></div>
+      <div class="bg-slate-50 rounded-lg p-2 text-center"><p class="text-slate-400">Total Deposit</p><p class="font-bold text-slate-800">৳${Number(u.totalDeposited||u.deposited||0).toFixed(0)}</p></div>
     </div>
     <div class="text-[11px] text-slate-500 space-y-0.5 mb-3">
       <p>Country: <b class="text-slate-700">${u.country||'—'}</b> • Join: <b class="text-slate-700">${u.joinDate||'—'}</b></p>
       <p>Jobs Unlocked: <b class="text-slate-700">${u.jobsUnlocked?'Yes':'No'}</b> • Verify: <b class="text-slate-700">${u.verifyStatus||'none'}</b></p>
     </div>
-    <div class="flex flex-wrap gap-2">${actions}</div>
+    <div class="flex flex-wrap gap-2">
+      <button onclick="adminUserDetails('${u.authUid}')" class="text-[11px] px-3 py-1.5 rounded-lg font-semibold bg-blue-100 text-blue-700"><i class="fa-solid fa-circle-info"></i> Details</button>
+      ${actions}
+    </div>
   </div>`;
+}
+
+function adminUserDetails(uid){
+  const u = users[uid] || Object.values(users||{}).find(x => x.authUid===uid || x.userId===uid);
+  if(!u) return toast('User পাওয়া যায়নি','err');
+  const old = document.getElementById('adminUserDetailsModal');
+  if(old) old.remove();
+  const totalDep = Number(u.totalDeposited || 0) || (u.deposits||[]).filter(d=>['Accepted','Approved','Confirmed','Success'].includes(String(d.status||''))).reduce((s,d)=>s+(parseFloat(d.amount)||0),0);
+  const tasksCount = (u.tasks||[]).length;
+  const jobsPosted = (u.postedJobs||[]).length || Number(u.lifetimeJobsPosted)||0;
+  const mode = u.mode || 'Worker';
+  const html = `<div id="adminUserDetailsModal" class="fixed inset-0 z-[85] flex items-center justify-center p-4">
+    <div class="absolute inset-0 bg-black/50" onclick="document.getElementById('adminUserDetailsModal').remove()"></div>
+    <div class="relative bg-white rounded-3xl shadow-2xl w-full max-w-md max-h-[85vh] overflow-y-auto p-5 z-10">
+      <div class="flex justify-between items-start mb-4">
+        <div>
+          <h3 class="font-bold text-lg text-slate-900">${u.name||'User'}</h3>
+          <p class="text-xs text-slate-500">${u.email||''}</p>
+          <p class="text-[10px] text-slate-500 font-mono mt-0.5 break-all">${u.authUid||u.userId||''}</p>
+        </div>
+        <button onclick="document.getElementById('adminUserDetailsModal').remove()" class="text-slate-400 text-xl">&times;</button>
+      </div>
+      <div class="grid grid-cols-2 gap-2 text-sm mb-4">
+        <div class="bg-green-50 rounded-xl p-3 text-center border border-green-100">
+          <p class="text-[10px] text-green-600 font-semibold uppercase">Earning Balance</p>
+          <p class="font-extrabold text-green-700 text-lg">৳${Number(u.earned||0).toFixed(2)}</p>
+        </div>
+        <div class="bg-emerald-50 rounded-xl p-3 text-center border border-emerald-100">
+          <p class="text-[10px] text-emerald-600 font-semibold uppercase">Deposit Balance</p>
+          <p class="font-extrabold text-emerald-700 text-lg">৳${Number(u.deposited||0).toFixed(2)}</p>
+        </div>
+        <div class="bg-slate-50 rounded-xl p-3 text-center border border-slate-100">
+          <p class="text-[10px] text-slate-500 font-semibold uppercase">Total Deposited</p>
+          <p class="font-extrabold text-slate-800 text-lg">৳${totalDep.toFixed(0)}</p>
+        </div>
+        <div class="bg-amber-50 rounded-xl p-3 text-center border border-amber-100">
+          <p class="text-[10px] text-amber-600 font-semibold uppercase">Total Earned</p>
+          <p class="font-extrabold text-amber-700 text-lg">৳${Number(u.totalEarned||u.earned||0).toFixed(0)}</p>
+        </div>
+      </div>
+      <div class="space-y-2 text-sm border border-slate-100 rounded-2xl p-4 mb-4">
+        <div class="flex justify-between"><span class="text-slate-500">Mode</span><span class="font-semibold text-slate-800">${mode}</span></div>
+        <div class="flex justify-between"><span class="text-slate-500">Tasks Done</span><span class="font-semibold text-slate-800">${tasksCount}</span></div>
+        <div class="flex justify-between"><span class="text-slate-500">Jobs Posted</span><span class="font-semibold text-slate-800">${jobsPosted}</span></div>
+        <div class="flex justify-between"><span class="text-slate-500">Country</span><span class="font-semibold text-slate-800">${u.country||'—'}</span></div>
+        <div class="flex justify-between"><span class="text-slate-500">Join Date</span><span class="font-semibold text-slate-800">${u.joinDate||'—'}</span></div>
+        <div class="flex justify-between"><span class="text-slate-500">Jobs Unlocked</span><span class="font-semibold text-slate-800">${u.jobsUnlocked?'Yes':'No'}</span></div>
+        <div class="flex justify-between"><span class="text-slate-500">Verify Status</span><span class="font-semibold text-slate-800">${u.verifyStatus||'none'}</span></div>
+        <div class="flex justify-between"><span class="text-slate-500">Suspended</span><span class="font-semibold ${u.banned?'text-red-600':'text-green-600'}">${u.banned?'Yes':'No'}</span></div>
+        <div class="flex justify-between"><span class="text-slate-500">Suspend Count</span><span class="font-semibold text-slate-800">${Number(u.suspendCount)||0}</span></div>
+        <div class="flex justify-between"><span class="text-slate-500">Role</span><span class="font-semibold text-slate-800">${u.role||'user'}</span></div>
+      </div>
+      <button onclick="document.getElementById('adminUserDetailsModal').remove()" class="w-full py-2.5 rounded-xl bg-slate-100 text-slate-700 font-semibold text-sm">Close</button>
+    </div>
+  </div>`;
+  document.body.insertAdjacentHTML('beforeend', html);
 }
 
 async function adminSendUserNotice(uid){
@@ -5376,13 +5551,12 @@ async function renderAdminAppeals(){
         <p class="text-sm text-slate-800 whitespace-pre-wrap">${u.appealText||'—'}</p>
         <p class="text-[10px] text-slate-400 mt-1">${u.appealDate ? new Date(u.appealDate).toLocaleString() : ''}</p>
       </div>
-      <div class="grid grid-cols-2 sm:grid-cols-4 gap-2 text-xs mb-3">
+      <div class="grid grid-cols-2 gap-2 text-xs mb-3">
         <div class="bg-slate-50 rounded-lg p-2 text-center"><p class="text-slate-400">Earning</p><p class="font-bold text-green-600">৳${Number(u.earned||0).toFixed(0)}</p></div>
-        <div class="bg-slate-50 rounded-lg p-2 text-center"><p class="text-slate-400">Deposit</p><p class="font-bold">৳${Number(u.deposited||0).toFixed(0)}</p></div>
-        <div class="bg-slate-50 rounded-lg p-2 text-center"><p class="text-slate-400">Tasks</p><p class="font-bold">${(u.tasks||[]).length}</p></div>
-        <div class="bg-slate-50 rounded-lg p-2 text-center"><p class="text-slate-400">Country</p><p class="font-bold">${u.country||'—'}</p></div>
+        <div class="bg-slate-50 rounded-lg p-2 text-center"><p class="text-slate-400">Total Deposit</p><p class="font-bold">৳${Number(u.totalDeposited||u.deposited||0).toFixed(0)}</p></div>
       </div>
       <div class="flex flex-wrap gap-2">
+        <button onclick="adminUserDetails('${safeUid}')" class="text-[11px] px-3 py-1.5 rounded-lg font-semibold bg-blue-100 text-blue-700"><i class="fa-solid fa-circle-info"></i> Details</button>
         <button onclick="adminConfirm('Appeal Approve করে Unsuspend করবেন?',()=>adminResolveAppeal('${safeUid}','approve'))" class="text-[11px] px-3 py-1.5 rounded-lg font-semibold bg-emerald-100 text-emerald-700">Approve Appeal</button>
         <button onclick="adminConfirm('Appeal Reject করবেন?',()=>adminResolveAppeal('${safeUid}','reject'))" class="text-[11px] px-3 py-1.5 rounded-lg font-semibold bg-orange-100 text-orange-700">Reject Appeal</button>
       </div>
@@ -5495,6 +5669,7 @@ function renderAdminDeposits(){
         <div>
           <p class="font-bold text-slate-900">${d.userName||d.name} (${d.userId})</p>
           <p class="text-xs text-slate-500">${d.method} • ${d.purpose||'buyer'} • ${d.sender||''}</p>
+          ${d.txnId ? `<p class="text-xs text-slate-600 mt-0.5">Txn ID: <span class="font-mono font-semibold text-slate-800">${d.txnId}</span></p>` : ''}
         </div>
         <span class="text-[10px] font-bold px-2 py-0.5 rounded-full ${badge}">${st}</span>
       </div>
@@ -5954,18 +6129,144 @@ async function adminReportSuspend(userId, reportDocId){
   toast('User Suspended');
 }
 
-function adminBroadcast(){
+let _broadcastHistory = [];
+
+async function loadBroadcastHistory(){
+  try {
+    if(window.fbGetDoc){
+      const data = await window.fbGetDoc('config', 'broadcast_notices');
+      _broadcastHistory = (data && Array.isArray(data.list)) ? data.list : [];
+    }
+  } catch(e){ _broadcastHistory = _broadcastHistory || []; }
+  return _broadcastHistory;
+}
+
+async function saveBroadcastHistory(list){
+  _broadcastHistory = list || [];
+  try {
+    if(window.fbSetDoc) await window.fbSetDoc('config', 'broadcast_notices', { list: _broadcastHistory });
+  } catch(e){ console.error(e); }
+}
+
+function renderBroadcastHistory(){
+  const el = document.getElementById('adminBroadcastHistory');
+  if(!el) return;
+  if(!_broadcastHistory || !_broadcastHistory.length){
+    el.innerHTML = '<p class="text-slate-400 text-center py-6 text-sm">এখনো কোনো Broadcast Notice নেই</p>';
+    return;
+  }
+  el.innerHTML = _broadcastHistory.map((n, i) => {
+    return `<div class="bg-white rounded-2xl border border-slate-200 p-4 shadow-sm">
+      <div class="flex justify-between items-start mb-2">
+        <div class="min-w-0 flex-1">
+          <p class="font-bold text-slate-900 text-sm">${(n.title||'').replace(/</g,'&lt;')}</p>
+          <p class="text-xs text-slate-600 mt-1 whitespace-pre-wrap">${(n.body||'').replace(/</g,'&lt;')}</p>
+          <p class="text-[10px] text-slate-400 mt-1.5">${n.time || ''}</p>
+        </div>
+      </div>
+      <div class="flex gap-2 mt-2">
+        <button onclick="adminEditBroadcast(${i})" class="flex-1 bg-blue-50 text-blue-700 text-xs font-bold py-2 rounded-xl">Edit</button>
+        <button onclick="adminConfirm('এই Notice ডিলিট করবেন? ইউজারদের Notification থেকেও মুছে যাবে।',()=>adminDeleteBroadcast(${i}))" class="flex-1 bg-red-50 text-red-600 text-xs font-bold py-2 rounded-xl">Delete</button>
+      </div>
+    </div>`;
+  }).join('');
+}
+
+async function adminBroadcast(){
   const title = document.getElementById('admNoticeTitle')?.value?.trim();
   const body = document.getElementById('admNoticeBody')?.value?.trim();
   if(!title || !body) return toast('Title ও Body দিন','err');
+  const noticeId = Date.now() + Math.random();
+  const notice = {
+    id: noticeId,
+    title,
+    body,
+    time: new Date().toLocaleString(),
+    ts: Date.now(),
+    fromBroadcast: true
+  };
+  // Push to all users
   Object.values(users).forEach(u=>{
+    if(!u || !u.authUid) return;
     u.notices = u.notices || [];
-    u.notices.unshift({id:Date.now()+Math.random(), title, body, time:'Just now'});
+    u.notices.unshift({
+      id: noticeId,
+      title,
+      body,
+      time: notice.time,
+      ts: notice.ts,
+      fromBroadcast: true
+    });
     if(window.fbSaveUser && u.authUid) window.fbSaveUser(u);
   });
-document.getElementById('admNoticeTitle').value='';
+  // Save to history
+  await loadBroadcastHistory();
+  _broadcastHistory.unshift(notice);
+  await saveBroadcastHistory(_broadcastHistory);
+  document.getElementById('admNoticeTitle').value='';
   document.getElementById('admNoticeBody').value='';
+  renderBroadcastHistory();
   toast('Notice broadcast to all users');
+}
+
+function adminEditBroadcast(idx){
+  const n = _broadcastHistory[idx];
+  if(!n) return;
+  const old = document.getElementById('adminBroadcastEditModal');
+  if(old) old.remove();
+  const html = `<div id="adminBroadcastEditModal" class="fixed inset-0 z-[85] flex items-center justify-center p-4">
+    <div class="absolute inset-0 bg-black/50" onclick="document.getElementById('adminBroadcastEditModal').remove()"></div>
+    <div class="relative bg-white rounded-3xl shadow-2xl w-full max-w-sm p-5 z-10">
+      <h3 class="font-bold text-lg text-slate-900 mb-1">Broadcast Edit</h3>
+      <p class="text-xs text-slate-500 mb-3">Edit করলে শুধু History আপডেট হবে। ইউজারদের পুরনো নোটিশ বদলাবে না।</p>
+      <input type="text" id="bcEditTitle" class="w-full border-2 border-slate-200 rounded-xl px-4 py-2.5 text-sm focus:outline-none focus:border-green-500 mb-2" placeholder="Title">
+      <textarea id="bcEditBody" class="w-full border-2 border-slate-200 rounded-xl px-4 py-3 text-sm focus:outline-none focus:border-green-500 resize-none h-28 mb-4" placeholder="Body"></textarea>
+      <div class="flex gap-2">
+        <button type="button" onclick="document.getElementById('adminBroadcastEditModal').remove()" class="flex-1 py-2.5 rounded-xl bg-slate-100 text-slate-700 font-semibold text-sm">বাতিল</button>
+        <button type="button" id="bcEditSaveBtn" class="flex-1 py-2.5 rounded-xl bg-green-600 hover:bg-green-700 text-white font-bold text-sm">সেভ</button>
+      </div>
+    </div>
+  </div>`;
+  document.body.insertAdjacentHTML('beforeend', html);
+  document.getElementById('bcEditTitle').value = n.title || '';
+  document.getElementById('bcEditBody').value = n.body || '';
+  document.getElementById('bcEditSaveBtn').onclick = async function(){
+    const t = (document.getElementById('bcEditTitle')?.value || '').trim();
+    const b = (document.getElementById('bcEditBody')?.value || '').trim();
+    if(!t || !b) return toast('Title ও Body দিন','err');
+    n.title = t;
+    n.body = b;
+    n.edited = true;
+    n.editedAt = new Date().toLocaleString();
+    await saveBroadcastHistory(_broadcastHistory);
+    document.getElementById('adminBroadcastEditModal')?.remove();
+    renderBroadcastHistory();
+    toast('Broadcast Notice আপডেট হয়েছে');
+  };
+}
+
+async function adminDeleteBroadcast(idx){
+  const n = _broadcastHistory[idx];
+  if(!n) return;
+  const noticeId = n.id;
+  // Remove from history
+  _broadcastHistory.splice(idx, 1);
+  await saveBroadcastHistory(_broadcastHistory);
+  // Remove from all users' notices
+  Object.values(users).forEach(u=>{
+    if(!u || !u.notices) return;
+    const before = u.notices.length;
+    u.notices = u.notices.filter(x => {
+      if(noticeId && x.id === noticeId) return false;
+      if(x.fromBroadcast && x.title === n.title && x.body === n.body) return false;
+      return true;
+    });
+    if(u.notices.length !== before && window.fbSaveUser && u.authUid){
+      window.fbSaveUser(u);
+    }
+  });
+  renderBroadcastHistory();
+  toast('Notice ডিলিট হয়েছে (ইউজারদের থেকেও)');
 }
 
 async function adminSaveUnlockSettings(){
@@ -5980,11 +6281,62 @@ async function adminSaveUnlockSettings(){
     try { prev = (window.fbLoadSettings && await window.fbLoadSettings()) || {}; } catch(e){}
     const merged = Object.assign({}, prev, s);
     if(window.fbSaveSettings) await window.fbSaveSettings(merged);
-    if(s.unlockNeed) window._unlockNeed = s.unlockNeed;
-    toast('Unlock Settings saved');
+    window._unlockNeed = s.unlockNeed;
+    window._depMin = s.depMin;
+    window._wdMin = s.wdMin;
+    // Update UI labels site-wide
+    if(typeof applySiteLimitsToUI === 'function') applySiteLimitsToUI();
+    toast('Settings saved — সাইট জুড়ে প্রযোজ্য');
   } catch(e){
     console.error(e);
     toast('Save failed','err');
+  }
+}
+
+/** Apply admin limits to deposit/withdraw/unlock UI texts & inputs */
+function applySiteLimitsToUI(){
+  const depMin = getDepMin();
+  const wdMin = getWdMin();
+  const unlockNeed = getUnlockNeed();
+  // Deposit amount input
+  const depAmt = document.getElementById('depAmount');
+  if(depAmt){
+    depAmt.min = depMin;
+    depAmt.placeholder = 'Min ৳' + depMin;
+  }
+  // Deposit min helper text
+  document.querySelectorAll('#view-deposit p').forEach(p=>{
+    if(p.textContent && p.textContent.includes('Min ৳') && p.textContent.includes('ফিসহ')){
+      p.textContent = 'Min ৳' + depMin + ' • আপনাকে ২% ফিসহ টোটাল পাঠাতে হবে';
+    }
+  });
+  // Unlock option label
+  const unlockOpt = document.getElementById('depUnlockOption');
+  if(unlockOpt){
+    const span = unlockOpt.querySelector('.text-\\[11px\\]') || unlockOpt.querySelectorAll('span')[1];
+    // update fixed amount text if present
+    unlockOpt.querySelectorAll('span').forEach(sp=>{
+      if(sp.textContent && sp.textContent.includes('ফিক্সড')){
+        sp.textContent = 'সব কাজ আনলক — ফিক্সড ৳' + unlockNeed;
+      }
+    });
+  }
+  // Withdraw amount
+  const wdAmt = document.getElementById('wdAmount');
+  if(wdAmt){
+    wdAmt.min = wdMin;
+    wdAmt.placeholder = 'Min ৳' + wdMin + ' – Max ৳10,000';
+  }
+  // Jobs unlock hint
+  const hint = document.getElementById('jobsUnlockHint');
+  if(hint){
+    const bold = hint.querySelector('.text-green-700');
+    if(bold) bold.textContent = '৳' + unlockNeed + ' Earning';
+    // full text rebuild for clarity
+    const p = hint.querySelector('p');
+    if(p){
+      p.innerHTML = 'সব কাজ পেতে প্রথমে <span class="text-green-700 font-semibold">৳'+unlockNeed+' Earning</span> থাকতে হবে। ৳'+unlockNeed+' Earning হলে সকল কাজ করতে পারবেন।';
+    }
   }
 }
 
@@ -6875,13 +7227,16 @@ function openSitePage(key){
 
     <div id="admin-notices" class="hidden">
       <h2 class="font-bold text-lg text-slate-900 mb-3">Broadcast Notice</h2>
-      <div class="bg-white rounded-2xl border border-slate-200 p-5 shadow-sm">
+      <div class="bg-white rounded-2xl border border-slate-200 p-5 shadow-sm mb-4">
         <label class="block text-sm font-semibold text-slate-700 mb-1">Title</label>
         <input type="text" id="admNoticeTitle" class="input-f mb-3" placeholder="Notice title">
         <label class="block text-sm font-semibold text-slate-700 mb-1">Body</label>
         <textarea id="admNoticeBody" class="input-f h-24 mb-4 resize-none" placeholder="Notice message..."></textarea>
         <button onclick="adminBroadcast()" class="w-full bg-green-600 hover:bg-green-700 text-white font-bold py-3 rounded-xl">Send to All Users</button>
       </div>
+      <h3 class="font-bold text-slate-800 mb-2">Broadcast History</h3>
+      <p class="text-xs text-slate-500 mb-3">পূর্বের Broadcast Notice এখানে থাকবে। Edit/Delete করা যাবে। Delete করলে ইউজারদের Notification থেকেও মুছে যাবে।</p>
+      <div id="adminBroadcastHistory" class="space-y-3"></div>
     </div>
 
     <div id="admin-ads" class="hidden">
